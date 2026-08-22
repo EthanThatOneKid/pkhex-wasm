@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/spike/">
+    <Project Path="spike/SpikeApp/SpikeApp.csproj" />
+    <Project Path="spike/SpikeLib.Tests/SpikeLib.Tests.csproj" />
+    <Project Path="spike/SpikeLib/SpikeLib.csproj" />
+  </Folder>
+</Solution>

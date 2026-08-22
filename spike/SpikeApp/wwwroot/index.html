@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>pkhex-wasm spike</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="data:,">
+  <link rel="preload" id="webassembly" />
+  <script type="importmap"></script>
+  <script type='module' src="main#[.{fingerprint}].js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
+    button { padding: 0.4rem 1rem; cursor: pointer; }
+    input { padding: 0.35rem; }
+    .card { border: 1px solid #ccc; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+    .status { color: #666; font-size: 0.9rem; }
+    .status.error { color: #b00020; }
+    [data-testid] { font-weight: 600; }
+  </style>
+</head>
+
+<body>
+  <h1>pkhex-wasm validation spike</h1>
+  <p class="status" id="status">loading runtime…</p>
+
+  <p>
+    <button id="generate">Generate demo save</button>
+    <label>…or load a real Gen 1 save: <input type="file" id="load-file" accept=".sav" /></label>
+  </p>
+
+  <div class="card" id="mon-card" hidden>
+    <div>Species: <span data-testid="species" id="species"></span></div>
+    <div>Level: <span data-testid="level" id="level"></span></div>
+    <div>Nickname: <span data-testid="nickname" id="nickname"></span></div>
+    <div>
+      <input id="new-nickname" maxlength="10" placeholder="new nickname" />
+      <button id="rename">Rename</button>
+      <button id="export">Export save bytes</button>
+    </div>
+  </div>
+
+  <p class="status">Save bytes in memory: <span data-testid="save-size" id="save-size">0</span> · API <span data-testid="api-version" id="api-version"></span></p>
+</body>
+
+</html>
