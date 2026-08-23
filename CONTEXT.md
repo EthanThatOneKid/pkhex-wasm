@@ -20,6 +20,14 @@ _Avoid_: "the object layer"
 The interop layer between JavaScript and .NET, built on `[JSExport]`.
 _Avoid_: "glue", "shim"
 
+**Handle**:
+A JavaScript object referencing a live wasm-side instance (`Game`, `Pokemon`); mutations through it are reflected in the next export.
+_Avoid_: "wrapper object", "ref"
+
+**Lookup table**:
+Build-time-generated reference data (species, natures, items) exposed to JS; universal tables are global, game-dependent ones live on the `Game` handle.
+_Avoid_: "repository", "database"
+
 **Wasm host**:
 The browser-side arrangement of the .NET runtime running Core; committed to bare Mono-wasm (`wasmbrowser`) with no Blazor.
 _Avoid_: "runtime backend"
