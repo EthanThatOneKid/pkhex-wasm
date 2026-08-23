@@ -36,6 +36,15 @@ export class PokemonHandle implements Pokemon {
   readonly #api: PkHexApiExports;
   readonly #handle: number;
 
+  /** Runs one wasm mutator, rethrowing guard failures as locked JS errors. */
+  #mutate(apply: () => void): void {
+    try {
+      apply();
+    } catch (cause) {
+      mapGuardError(cause);
+    }
+  }
+
   constructor(handle: number, api: PkHexApiExports) {
     this.#api = api;
     this.#handle = handle;
@@ -105,63 +114,35 @@ export class PokemonHandle implements Pokemon {
   }
 
   setNickname(nickname: string): void {
-    try {
-      this.#api.MonSetNickname(this.#handle, nickname);
-    } catch (cause) {
-      mapGuardError(cause);
-    }
+    this.#mutate(() => this.#api.MonSetNickname(this.#handle, nickname));
   }
 
   setLevel(level: number): void {
     // Spec: values outside 1..100 clamp.
     const clamped = Math.min(100, Math.max(1, Math.round(level)));
-    try {
-      this.#api.MonSetLevel(this.#handle, clamped);
-    } catch (cause) {
-      mapGuardError(cause);
-    }
+    this.#mutate(() => this.#api.MonSetLevel(this.#handle, clamped));
   }
 
   setMoves(moveIds: readonly [number, number, number, number]): void {
-    try {
-      this.#api.MonSetMoves(this.#handle, Int32Array.from(moveIds));
-    } catch (cause) {
-      mapGuardError(cause);
-    }
+    this.#mutate(() => this.#api.MonSetMoves(this.#handle, Int32Array.from(moveIds)));
   }
 
   setNature(natureId: number): void {
     // Mint-aware wasm-side: nature and stat alignment are written together,
     // so Gen 8+ formats derive stats from the new nature immediately.
-    try {
-      this.#api.MonSetNature(this.#handle, natureId);
-    } catch (cause) {
-      mapGuardError(cause);
-    }
+    this.#mutate(() => this.#api.MonSetNature(this.#handle, natureId));
   }
 
   setShiny(shiny: boolean): void {
-    try {
-      this.#api.MonSetShiny(this.#handle, shiny);
-    } catch (cause) {
-      mapGuardError(cause);
-    }
+    this.#mutate(() => this.#api.MonSetShiny(this.#handle, shiny));
   }
 
   setIVs(partial: Partial<StatBlock>): void {
-    try {
-      this.#api.MonSetIVs(this.#handle, Int32Array.from(mergeInto(this.ivs, partial)));
-    } catch (cause) {
-      mapGuardError(cause);
-    }
+    this.#mutate(() => this.#api.MonSetIVs(this.#handle, Int32Array.from(mergeInto(this.ivs, partial))));
   }
 
   setEVs(partial: Partial<StatBlock>): void {
-    try {
-      this.#api.MonSetEVs(this.#handle, Int32Array.from(mergeInto(this.evs, partial)));
-    } catch (cause) {
-      mapGuardError(cause);
-    }
+    this.#mutate(() => this.#api.MonSetEVs(this.#handle, Int32Array.from(mergeInto(this.evs, partial))));
   }
 }
 

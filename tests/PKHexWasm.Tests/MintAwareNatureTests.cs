@@ -31,13 +31,13 @@ public sealed class MintAwareNatureTests
     }
 
     /// <summary>
-    /// Swish formats (SwSh/PLA/SV/Z-A) cannot load blank fixtures (probe:
-    /// their block layout matches no retail size), so the shared write path
-    /// is pinned at the Core seam: both fields take the written nature.
+    /// Swish edit-tier formats (SwSh/SV/Z-A) cannot load blank fixtures
+    /// (probe: their block layout matches no retail size), so the shared
+    /// write path is pinned at the Core seam: both fields take the written
+    /// nature. PLA is excluded - a read-only tier never runs this path.
     /// </summary>
     [Theory]
     [InlineData(EntityContext.Gen8)]
-    [InlineData(EntityContext.Gen8a)]
     [InlineData(EntityContext.Gen9)]
     [InlineData(EntityContext.Gen9a)]
     public void Mint_write_sets_nature_and_stat_alignment_on_swish_formats(EntityContext context)
