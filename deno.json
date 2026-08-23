@@ -1,0 +1,5 @@
+{
+  "tasks": {
+    "doc": "deno doc --html --name=pkhex-wasm --output=./_docs/ docs/api/pkhex-wasm.d.ts"
+  }
+}
