@@ -403,8 +403,8 @@ when either side changes without the other.
 | `MonSetIVs` | `Pokemon.setIVs` | partial merge resolved client-side |
 | `MonSetLevel` | `Pokemon.setLevel` | client clamps 1..100 before the call |
 | `MonSetMoves` | `Pokemon.setMoves` |  |
-| `MonSetNature` | `Pokemon.setNature` | throws until mint-aware writes land (#22) |
-| `MonSetNickname` | `Pokemon.setNickname` |  |
+| `MonSetNature` | `Pokemon.setNature` | mint-aware: nature + stat alignment written together |
+| `MonSetNickname` | `Pokemon.setNickname` | rejects beyond the generation's length cap |
 | `MonSetShiny` | `Pokemon.setShiny` |  |
 | `MonSpecies` | `Pokemon.species` |  |
 | `MonStats` | `Pokemon.stats` |  |

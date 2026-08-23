@@ -105,30 +105,37 @@ public static partial class PkHexExports
     public static int[] MonMoveSlots(int mon) => PKHexApi.MonMoveSlots(mon);
 
     [JSExport]
+    [JsThrows("UnsupportedTierError", "on read-only-tier saves")]
+    [JsThrows("RangeError", "when exceeding the generation's nickname length limit")]
     public static void MonSetNickname(int mon, string nickname) => PKHexApi.MonSetNickname(mon, nickname);
 
     [JSExport]
+    [JsThrows("UnsupportedTierError", "on read-only-tier saves")]
     public static void MonSetLevel(int mon, int level) => PKHexApi.MonSetLevel(mon, level);
 
     [JSExport]
+    [JsThrows("UnsupportedTierError", "on read-only-tier saves")]
     public static void MonSetMoves(int mon, int[] moveIds) => PKHexApi.MonSetMoves(mon, moveIds);
 
-    /// <summary>Mint-aware nature writes land with tier enforcement (#22).</summary>
+    /// <summary>Mint-aware write: sets nature and stat alignment together.</summary>
     [JSExport]
-    [JsThrows("NotSupportedException", "until mint-aware nature writes land with tier enforcement")]
+    [JsThrows("UnsupportedOperationError", "on Gen 1-2 (natures do not exist)")]
+    [JsThrows("UnsupportedTierError", "on other read-only-tier saves")]
+    [JsThrows("RangeError", "when the nature id is unknown")]
     public static void MonSetNature(int mon, int natureId) => PKHexApi.MonSetNature(mon, natureId);
 
-    /// <summary>PID manipulation on Gen 3+; Gen 1-2 shiny derives from DVs.</summary>
+    /// <summary>PID manipulation on Gen 3+; read-only tiers reject before reaching Core.</summary>
     [JSExport]
-    [JsThrows("NotSupportedException", "when unsetting shiny on Gen 1-2 formats (upstream hazard)")]
-    [JsThrows("UnsupportedTierError", "on read-only-tier saves once tiers land (#22)")]
+    [JsThrows("UnsupportedTierError", "on read-only-tier saves")]
     public static void MonSetShiny(int mon, bool shiny) => PKHexApi.MonSetShiny(mon, shiny);
 
     /// <summary>Merges individual values; omitted stats keep theirs. Clamps per generation.</summary>
     [JSExport]
+    [JsThrows("UnsupportedTierError", "on read-only-tier saves")]
     public static void MonSetIVs(int mon, int[] ivs) => PKHexApi.MonSetIVs(mon, ivs);
 
     /// <summary>Merges effort values; omitted stats keep theirs. Caps per generation.</summary>
     [JSExport]
+    [JsThrows("UnsupportedTierError", "on read-only-tier saves")]
     public static void MonSetEVs(int mon, int[] evs) => PKHexApi.MonSetEVs(mon, evs);
 }

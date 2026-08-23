@@ -1,3 +1,4 @@
+using PKHeX.Core;
 using PKHexWasm;
 
 namespace PKHexWasm.Tests;
@@ -13,6 +14,11 @@ public sealed class PKHexApiTests
     private const int PikachuSpecies = 25;
 
     private static byte[] DemoSave() => PKHexApi.GenerateDemoSave("SPIKE");
+
+    /// <summary>Workhorse edit-tier fixture (reload-capable per the #22 probe).</summary>
+    private static int EditableGame() => PKHexApi.Load(TestSaves.WithBoxMon(EntityContext.Gen8b));
+
+    private static int BoxMon(int game) => PKHexApi.GameBoxMonHandles(game, 0)[0];
 
     [Fact]
     public void GenerateDemoSave_produces_gen1_save()
@@ -95,19 +101,27 @@ public sealed class PKHexApiTests
     [Fact]
     public void Nickname_write_through_survives_export_reload()
     {
-        var game = PKHexApi.Load(DemoSave());
-        var mon = PKHexApi.GamePartyMonHandles(game)[0];
-        PKHexApi.MonSetNickname(mon, "Sparky");
+        var game = EditableGame();
+        PKHexApi.MonSetNickname(BoxMon(game), "Sparky");
 
         var reloaded = PKHexApi.Load(PKHexApi.SaveBytes(game));
-        Assert.Equal("Sparky", PKHexApi.MonNickname(PKHexApi.GamePartyMonHandles(reloaded)[0]));
+        Assert.Equal("Sparky", PKHexApi.MonNickname(PKHexApi.GameBoxMonHandles(reloaded, 0)[0]));
+    }
+
+    [Fact]
+    public void Nickname_rejects_beyond_generation_length_cap()
+    {
+        var game = EditableGame();
+        // BDSP (Gen 8) caps western nicknames at 12
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => PKHexApi.MonSetNickname(BoxMon(game), "ThirteenChars"));
     }
 
     [Fact]
     public void Level_write_through_adjusts_stats_and_survives_reload()
     {
-        var game = PKHexApi.Load(DemoSave());
-        var mon = PKHexApi.GamePartyMonHandles(game)[0];
+        var game = EditableGame();
+        var mon = BoxMon(game);
         var hpBefore = PKHexApi.MonStats(mon)[0];
 
         PKHexApi.MonSetLevel(mon, 42);
@@ -116,53 +130,53 @@ public sealed class PKHexApiTests
         Assert.True(PKHexApi.MonStats(mon)[0] >= hpBefore);
 
         var reloaded = PKHexApi.Load(PKHexApi.SaveBytes(game));
-        Assert.Equal(42, PKHexApi.MonLevel(PKHexApi.GamePartyMonHandles(reloaded)[0]));
+        Assert.Equal(42, PKHexApi.MonLevel(PKHexApi.GameBoxMonHandles(reloaded, 0)[0]));
     }
 
     [Fact]
     public void Box_writes_land_in_box_not_only_party()
     {
-        var game = PKHexApi.Load(DemoSave());
-        var boxMon = PKHexApi.GameBoxMonHandles(game, 0)[0];
-        PKHexApi.MonSetNickname(boxMon, "Boxed");
+        var game = EditableGame();
+        PKHexApi.MonSetNickname(BoxMon(game), "Boxed");
 
         var reloaded = PKHexApi.Load(PKHexApi.SaveBytes(game));
         Assert.Equal("Boxed", PKHexApi.MonNickname(PKHexApi.GameBoxMonHandles(reloaded, 0)[0]));
     }
 
     [Fact]
-    public void SetIVs_on_gen1_respects_dv_derivation()
+    public void SetIVs_overwrites_all_slots_within_generation_caps()
     {
-        // Spec GB quirks: HP DV derives from the others; SpA/SpD alias SPC.
-        // Sent in Core span order [HP, Atk, Def, Spe, SpA, SpD].
-        var game = PKHexApi.Load(DemoSave());
-        var ivs = new[] { 15, 14, 13, 12, 11, 10 };
-        PKHexApi.MonSetIVs(PKHexApi.GamePartyMonHandles(game)[0], ivs);
-        var got = PKHexApi.MonIVs(PKHexApi.GamePartyMonHandles(game)[0]);
+        var game = EditableGame();
+        // values above the modern cap of 31 clamp upstream
+        var ivs = new[] { 31, 30, 29, 28, 27, 40 };
+        PKHexApi.MonSetIVs(BoxMon(game), ivs);
+        var got = PKHexApi.MonIVs(BoxMon(game));
 
-        Assert.Equal(14, got[1]); // Atk stored as-is
-        Assert.Equal(13, got[2]); // Def stored as-is
-        Assert.Equal(got[4], got[5]); // SpA/SpD alias one SPC stat
-        // GB HP DV formula from parity bits: (Atk&1)*8 + (Def&1)*4 + (Spe&1)*2 + (SpA&1)
-        Assert.Equal(((14 & 1) << 3) | ((13 & 1) << 2) | ((12 & 1) << 1) | (11 & 1), got[0]);
+        Assert.Equal(31, got[5]); // clamped
+        Assert.Equal(new[] { 31, 30, 29, 28, 27, 31 }, got);
+
+        var reloaded = PKHexApi.Load(PKHexApi.SaveBytes(game));
+        Assert.Equal(got, PKHexApi.MonIVs(PKHexApi.GameBoxMonHandles(reloaded, 0)[0]));
     }
 
     [Fact]
     public void SetEVs_overwrites_all_slots_with_spc_shared_on_gen1()
     {
-        var game = PKHexApi.Load(DemoSave());
-        // SpA/SpD share the legacy SPC stat; keep them equal for an exact round-trip
-        var evs = new[] { 1000, 2000, 3000, 4000, 5000, 5000 };
-        PKHexApi.MonSetEVs(PKHexApi.GamePartyMonHandles(game)[0], evs);
-        Assert.Equal(evs, PKHexApi.MonEVs(PKHexApi.GamePartyMonHandles(game)[0]));
+        var game = EditableGame();
+        var evs = new[] { 252, 252, 0, 4, 6, 0 };
+        PKHexApi.MonSetEVs(BoxMon(game), evs);
+        Assert.Equal(evs, PKHexApi.MonEVs(BoxMon(game)));
+
+        var reloaded = PKHexApi.Load(PKHexApi.SaveBytes(game));
+        Assert.Equal(evs, PKHexApi.MonEVs(PKHexApi.GameBoxMonHandles(reloaded, 0)[0]));
     }
 
     [Fact]
     public void SetMoves_writes_four_slots_with_pp()
     {
-        var game = PKHexApi.Load(DemoSave());
+        var game = EditableGame();
         var moves = new[] { 1, 2, 3, 44 }; // pound / karate chop / double slap / bite
-        var mon = PKHexApi.GamePartyMonHandles(game)[0];
+        var mon = BoxMon(game);
         PKHexApi.MonSetMoves(mon, moves);
 
         var slots = PKHexApi.MonMoveSlots(mon); // flattened [id, pp] × 4
@@ -171,26 +185,37 @@ public sealed class PKHexApiTests
         Assert.Equal(moves[2], slots[4]);
         Assert.Equal(moves[3], slots[6]);
         Assert.True(slots[1] > 0);
+
+        var reloaded = PKHexApi.Load(PKHexApi.SaveBytes(game));
+        Assert.Equal(
+            moves,
+            PKHexApi.MonMoveSlots(PKHexApi.GameBoxMonHandles(reloaded, 0)[0])
+                .Where((_, i) => i % 2 == 0).ToArray());
     }
 
     [Fact]
-    public void SetShiny_enables_on_gen1()
+    public void SetShiny_round_trips_on_edit_tier()
     {
-        var game = PKHexApi.Load(DemoSave());
-        var mon = PKHexApi.GamePartyMonHandles(game)[0];
+        var game = EditableGame();
+        var mon = BoxMon(game);
         PKHexApi.MonSetShiny(mon, true);
         Assert.True(PKHexApi.MonIsShiny(mon));
 
+        PKHexApi.MonSetShiny(mon, false);
+        Assert.False(PKHexApi.MonIsShiny(mon));
+
+        PKHexApi.MonSetShiny(mon, true);
         var reloaded = PKHexApi.Load(PKHexApi.SaveBytes(game));
-        Assert.True(PKHexApi.MonIsShiny(PKHexApi.GamePartyMonHandles(reloaded)[0]));
+        Assert.True(PKHexApi.MonIsShiny(PKHexApi.GameBoxMonHandles(reloaded, 0)[0]));
     }
 
     [Fact]
     public void Unsetting_shiny_on_gen1_is_rejected_upstream_hazard()
     {
-        // Upstream infinite-loop hazard on GB formats; rejected at the boundary.
+        // Upstream infinite-loop hazard on GB formats; the read-only tier
+        // rejects before the call can ever reach Core.
         var game = PKHexApi.Load(DemoSave());
-        Assert.Throws<NotSupportedException>(
+        Assert.Throws<UnsupportedTierException>(
             () => PKHexApi.MonSetShiny(PKHexApi.GamePartyMonHandles(game)[0], false));
     }
 
@@ -209,15 +234,15 @@ public sealed class PKHexApiTests
     [Fact]
     public void Owner_attribution_round_trips()
     {
-        var game = PKHexApi.Load(DemoSave());
-        var mon = PKHexApi.GamePartyMonHandles(game)[0];
+        var game = EditableGame();
+        var mon = BoxMon(game);
         Assert.False(string.IsNullOrEmpty(PKHexApi.MonOwnerName(mon)));
 
         PKHexApi.MonSetNickname(mon, "X");
         var reloaded = PKHexApi.Load(PKHexApi.SaveBytes(game));
         Assert.Equal(
             PKHexApi.MonOwnerName(mon),
-            PKHexApi.MonOwnerName(PKHexApi.GamePartyMonHandles(reloaded)[0]));
+            PKHexApi.MonOwnerName(PKHexApi.GameBoxMonHandles(reloaded, 0)[0]));
     }
 
     [Fact]

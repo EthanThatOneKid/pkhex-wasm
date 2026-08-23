@@ -333,7 +333,12 @@
         }
       ],
       "doc": "Merges effort values; omitted stats keep theirs. Caps per generation.",
-      "throws": [],
+      "throws": [
+        {
+          "error": "UnsupportedTierError",
+          "clause": "on read-only-tier saves"
+        }
+      ],
       "file": "PkHexExports.cs"
     },
     {
@@ -350,7 +355,12 @@
         }
       ],
       "doc": "Merges individual values; omitted stats keep theirs. Clamps per generation.",
-      "throws": [],
+      "throws": [
+        {
+          "error": "UnsupportedTierError",
+          "clause": "on read-only-tier saves"
+        }
+      ],
       "file": "PkHexExports.cs"
     },
     {
@@ -366,7 +376,12 @@
           "type": "int"
         }
       ],
-      "throws": [],
+      "throws": [
+        {
+          "error": "UnsupportedTierError",
+          "clause": "on read-only-tier saves"
+        }
+      ],
       "file": "PkHexExports.cs"
     },
     {
@@ -382,7 +397,12 @@
           "type": "int[]"
         }
       ],
-      "throws": [],
+      "throws": [
+        {
+          "error": "UnsupportedTierError",
+          "clause": "on read-only-tier saves"
+        }
+      ],
       "file": "PkHexExports.cs"
     },
     {
@@ -398,11 +418,19 @@
           "type": "int"
         }
       ],
-      "doc": "Mint-aware nature writes land with tier enforcement (#22).",
+      "doc": "Mint-aware write: sets nature and stat alignment together.",
       "throws": [
         {
-          "error": "NotSupportedException",
-          "clause": "until mint-aware nature writes land with tier enforcement"
+          "error": "UnsupportedOperationError",
+          "clause": "on Gen 1-2 (natures do not exist)"
+        },
+        {
+          "error": "UnsupportedTierError",
+          "clause": "on other read-only-tier saves"
+        },
+        {
+          "error": "RangeError",
+          "clause": "when the nature id is unknown"
         }
       ],
       "file": "PkHexExports.cs"
@@ -420,7 +448,16 @@
           "type": "string"
         }
       ],
-      "throws": [],
+      "throws": [
+        {
+          "error": "UnsupportedTierError",
+          "clause": "on read-only-tier saves"
+        },
+        {
+          "error": "RangeError",
+          "clause": "when exceeding the generation\u0027s nickname length limit"
+        }
+      ],
       "file": "PkHexExports.cs"
     },
     {
@@ -436,15 +473,11 @@
           "type": "bool"
         }
       ],
-      "doc": "PID manipulation on Gen 3\u002B; Gen 1-2 shiny derives from DVs.",
+      "doc": "PID manipulation on Gen 3\u002B; read-only tiers reject before reaching Core.",
       "throws": [
         {
-          "error": "NotSupportedException",
-          "clause": "when unsetting shiny on Gen 1-2 formats (upstream hazard)"
-        },
-        {
           "error": "UnsupportedTierError",
-          "clause": "on read-only-tier saves once tiers land (#22)"
+          "clause": "on read-only-tier saves"
         }
       ],
       "file": "PkHexExports.cs"

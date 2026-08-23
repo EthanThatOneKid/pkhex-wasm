@@ -50,10 +50,10 @@ export const BINDING_MAPPINGS: BindingMapping[] = [
   { export: "MonStats", target: "Pokemon.stats" },
   { export: "MonMoveSlots", target: "Pokemon.moves", note: "flat [id, pp] x4 reshaped into MoveSlot[]" },
 
-  { export: "MonSetNickname", target: "Pokemon.setNickname" },
+  { export: "MonSetNickname", target: "Pokemon.setNickname", note: "rejects beyond the generation's length cap" },
   { export: "MonSetLevel", target: "Pokemon.setLevel", note: "client clamps 1..100 before the call" },
   { export: "MonSetMoves", target: "Pokemon.setMoves" },
-  { export: "MonSetNature", target: "Pokemon.setNature", note: "throws until mint-aware writes land (#22)" },
+  { export: "MonSetNature", target: "Pokemon.setNature", note: "mint-aware: nature + stat alignment written together" },
   { export: "MonSetShiny", target: "Pokemon.setShiny" },
   { export: "MonSetIVs", target: "Pokemon.setIVs", note: "partial merge resolved client-side" },
   { export: "MonSetEVs", target: "Pokemon.setEVs", note: "partial merge resolved client-side" },

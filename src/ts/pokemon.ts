@@ -1,13 +1,36 @@
 import type { LookupRef, MoveSlot, Pokemon, StatBlock } from "./gen/types.ts";
 import type { PkHexApiExports } from "./pkhex.ts";
+import { UnsupportedOperationError, UnsupportedTierError } from "./gen/errors.ts";
 import { displayToWire, wireToDisplay } from "./game.ts";
+
+/**
+ * Rethrows wasm-side guard failures as the locked JS error classes.
+ *
+ * The mono-wasm boundary delivers only the exception message text, so the
+ * wasm facade composes stable sentinel prefixes into guard messages; this
+ * strips the tag and rethrows typed. Anything untagged surfaces as itself.
+ */
+function mapGuardError(cause: unknown): never {
+  const raw = cause instanceof Error ? cause.message : String(cause);
+  if (raw.startsWith("UnsupportedTierError:")) {
+    throw new UnsupportedTierError(raw.slice("UnsupportedTierError:".length).trim());
+  }
+  if (raw.startsWith("UnsupportedOperationError:")) {
+    throw new UnsupportedOperationError(raw.slice("UnsupportedOperationError:".length).trim());
+  }
+  if (raw.startsWith("RangeError:")) {
+    throw new RangeError(raw.slice("RangeError:".length).trim());
+  }
+  throw cause instanceof Error ? cause : new Error(raw);
+}
 
 /**
  * Write-through Handle over one Pokémon entity inside a loaded save.
  *
- * Reads resolve through the wasm Binding immediately; mutators apply only
- * within the edit tier and are guarded before reaching Core. Tier guards
- * (edit vs read-only) land with the tier-enforcement work.
+ * Reads resolve through the wasm Binding immediately; mutators write through
+ * instantly and are visible to the next export. Mutators apply only within
+ * the edit tier (Gen 3-7, SwSh, BDSP, SV, Legends Z-A) and throw
+ * {@link UnsupportedTierError} on read-only tiers (Gen 1-2, LGPE, PLA).
  */
 export class PokemonHandle implements Pokemon {
   readonly #api: PkHexApiExports;
@@ -82,35 +105,63 @@ export class PokemonHandle implements Pokemon {
   }
 
   setNickname(nickname: string): void {
-    this.#api.MonSetNickname(this.#handle, nickname);
+    try {
+      this.#api.MonSetNickname(this.#handle, nickname);
+    } catch (cause) {
+      mapGuardError(cause);
+    }
   }
 
   setLevel(level: number): void {
     // Spec: values outside 1..100 clamp.
     const clamped = Math.min(100, Math.max(1, Math.round(level)));
-    this.#api.MonSetLevel(this.#handle, clamped);
+    try {
+      this.#api.MonSetLevel(this.#handle, clamped);
+    } catch (cause) {
+      mapGuardError(cause);
+    }
   }
 
   setMoves(moveIds: readonly [number, number, number, number]): void {
-    this.#api.MonSetMoves(this.#handle, Int32Array.from(moveIds));
+    try {
+      this.#api.MonSetMoves(this.#handle, Int32Array.from(moveIds));
+    } catch (cause) {
+      mapGuardError(cause);
+    }
   }
 
   setNature(natureId: number): void {
-    // Tier guard + mint-aware write path land with tier enforcement; the wasm
-    // side currently routes through Core's CommonEdits.SetNature.
-    this.#api.MonSetNature(this.#handle, natureId);
+    // Mint-aware wasm-side: nature and stat alignment are written together,
+    // so Gen 8+ formats derive stats from the new nature immediately.
+    try {
+      this.#api.MonSetNature(this.#handle, natureId);
+    } catch (cause) {
+      mapGuardError(cause);
+    }
   }
 
   setShiny(shiny: boolean): void {
-    this.#api.MonSetShiny(this.#handle, shiny);
+    try {
+      this.#api.MonSetShiny(this.#handle, shiny);
+    } catch (cause) {
+      mapGuardError(cause);
+    }
   }
 
   setIVs(partial: Partial<StatBlock>): void {
-    this.#api.MonSetIVs(this.#handle, Int32Array.from(mergeInto(this.ivs, partial)));
+    try {
+      this.#api.MonSetIVs(this.#handle, Int32Array.from(mergeInto(this.ivs, partial)));
+    } catch (cause) {
+      mapGuardError(cause);
+    }
   }
 
   setEVs(partial: Partial<StatBlock>): void {
-    this.#api.MonSetEVs(this.#handle, Int32Array.from(mergeInto(this.evs, partial)));
+    try {
+      this.#api.MonSetEVs(this.#handle, Int32Array.from(mergeInto(this.evs, partial)));
+    } catch (cause) {
+      mapGuardError(cause);
+    }
   }
 }
 

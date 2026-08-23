@@ -242,7 +242,16 @@ public static partial class PKHexApi
     [JSExport]
     public static void MonSetNickname(int mon, string nickname)
     {
+        ArgumentNullException.ThrowIfNull(nickname);
         var entry = RequireMon(mon);
+        RequireEditable(entry, "setNickname");
+        var maxNick = Legal.GetMaxLengthNickname(entry.Pk.Context.Generation, (LanguageID)entry.Pk.Language);
+        if (nickname.Length > maxNick)
+        {
+            throw new ArgumentOutOfRangeException(nameof(nickname), nickname,
+                ErrorTags.Compose(ErrorTags.Range,
+                    $"nickname exceeds this generation's {maxNick} character limit"));
+        }
         CommonEdits.SetNickname(entry.Pk, nickname);
         Flush(entry);
     }
@@ -251,6 +260,7 @@ public static partial class PKHexApi
     public static void MonSetLevel(int mon, int level)
     {
         var entry = RequireMon(mon);
+        RequireEditable(entry, "setLevel");
         entry.Pk.CurrentLevel = (byte)level;
         Flush(entry);
     }
@@ -259,11 +269,12 @@ public static partial class PKHexApi
     public static void MonSetMoves(int mon, int[] moveIds)
     {
         ArgumentNullException.ThrowIfNull(moveIds);
+        var entry = RequireMon(mon);
+        RequireEditable(entry, "setMoves");
         if (moveIds.Length != 4)
         {
             throw new ArgumentException("exactly four move ids are required", nameof(moveIds));
         }
-        var entry = RequireMon(mon);
         entry.Pk.Move1 = (ushort)moveIds[0];
         entry.Pk.Move2 = (ushort)moveIds[1];
         entry.Pk.Move3 = (ushort)moveIds[2];
@@ -272,28 +283,37 @@ public static partial class PKHexApi
         Flush(entry);
     }
 
-    /// <summary>Mint-aware nature writes land with tier enforcement; rejected until then.</summary>
+    /// <summary>
+    /// Mint-aware nature write (Facade Natures.ChangeAll semantics): sets both
+    /// the displayed nature and stat alignment, since naïve writes silently
+    /// no-op on Gen 8+ formats where stats derive through mints/stat-alignment.
+    /// </summary>
     [JSExport]
     public static void MonSetNature(int mon, int natureId)
     {
-        // The naive CommonEdits.SetNature silently no-ops on Gen 8+ formats
-        // (natures derive through mints/stat-alignment there). Shipping it would
-        // corrupt edits silently; the Facade Natures.ChangeAll path lands with
-        // the tier-enforcement ticket and replaces this guard.
-        throw new NotSupportedException(
-            "setNature is not wired yet: mint-aware nature writes land with tier enforcement");
+        var entry = RequireMon(mon);
+        if (entry.Pk.Context <= EntityContext.Gen2)
+        {
+            throw new UnsupportedOperationException("setNature", entry.Pk.Context.ToString());
+        }
+        RequireEditable(entry, "setNature");
+        if (!Enum.IsDefined(typeof(Nature), (Nature)natureId))
+        {
+            throw new ArgumentOutOfRangeException(nameof(natureId), natureId,
+                ErrorTags.Compose(ErrorTags.Range, $"unknown nature id {natureId}"));
+        }
+
+        var nature = (Nature)natureId;
+        entry.Pk.Nature = nature;
+        entry.Pk.StatAlignment = nature;
+        Flush(entry);
     }
 
     [JSExport]
     public static void MonSetShiny(int mon, bool shiny)
     {
         var entry = RequireMon(mon);
-        if (!shiny && entry.Pk.Format <= 2)
-        {
-            // Upstream's GB unset path cannot terminate (PID reroll against a
-            // no-op PID setter); reject at the boundary until tiers formalize.
-            throw new NotSupportedException("unsetting shiny is not supported on Gen 1-2 formats");
-        }
+        RequireEditable(entry, "setShiny"); // GB formats reject here; upstream unset path never reached
         if (shiny)
         {
             entry.Pk.SetShiny();
@@ -310,11 +330,12 @@ public static partial class PKHexApi
     public static void MonSetIVs(int mon, int[] ivs)
     {
         ArgumentNullException.ThrowIfNull(ivs);
+        var entry = RequireMon(mon);
+        RequireEditable(entry, "setIVs");
         if (ivs.Length != 6)
         {
             throw new ArgumentException("exactly six values are required", nameof(ivs));
         }
-        var entry = RequireMon(mon);
         entry.Pk.SetIVs((ReadOnlySpan<int>)ivs);
         Flush(entry);
     }
@@ -324,16 +345,26 @@ public static partial class PKHexApi
     public static void MonSetEVs(int mon, int[] evs)
     {
         ArgumentNullException.ThrowIfNull(evs);
+        var entry = RequireMon(mon);
+        RequireEditable(entry, "setEVs");
         if (evs.Length != 6)
         {
             throw new ArgumentException("exactly six values are required", nameof(evs));
         }
-        var entry = RequireMon(mon);
         entry.Pk.SetEVs((ReadOnlySpan<int>)evs);
         Flush(entry);
     }
 
     // ---- plumbing ----------------------------------------------------------
+
+    /// <summary>Tier guard: read-only formats reject every mutator before reaching Core.</summary>
+    private static void RequireEditable(MonEntry entry, string operation)
+    {
+        if (entry.Pk.Context.Tier() == SupportTier.ReadOnly)
+        {
+            throw new UnsupportedTierException(operation, entry.Pk.Context.ToString());
+        }
+    }
 
     private static SaveFile RequireGame(int game) =>
         Games.TryGetValue(game, out var entry)
