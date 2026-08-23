@@ -195,6 +195,18 @@ public sealed class PKHexApiTests
     }
 
     [Fact]
+    public void Money_reads_from_the_trainer_block()
+    {
+        var game = PKHexApi.Load(DemoSave());
+        var money = PKHexApi.GameMoney(game);
+        Assert.True(money >= 0);
+
+        // value survives an export/reload cycle
+        var reloaded = PKHexApi.Load(PKHexApi.SaveBytes(game));
+        Assert.Equal(money, PKHexApi.GameMoney(reloaded));
+    }
+
+    [Fact]
     public void Owner_attribution_round_trips()
     {
         var game = PKHexApi.Load(DemoSave());

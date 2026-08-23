@@ -61,6 +61,7 @@ export class GameHandle implements Game {
         sid: this.#api.GameTrainerSecretId(this.#handle),
       },
       gender: this.#api.GameTrainerGender(this.#handle) as TrainerInfo["gender"],
+      money: this.#api.GameMoney(this.#handle),
     };
   }
 

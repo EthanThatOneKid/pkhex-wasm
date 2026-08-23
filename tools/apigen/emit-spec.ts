@@ -85,8 +85,15 @@ function renderInterface(i: InterfaceModel): string[] {
   return lines;
 }
 
+/** One row of the generated runtime binding map. */
+export interface BindingRow {
+  export: string;
+  target: string;
+  note?: string;
+}
+
 /** The generated chapter injected at the API-reference marker. */
-export function buildApiReference(): string {
+export function buildApiReference(bindingRows?: readonly BindingRow[]): string {
   const lines: string[] = [];
   lines.push("## Public surface", "");
   lines.push(
@@ -109,6 +116,21 @@ export function buildApiReference(): string {
     lines.push(...initParams.map((p) => `- **\`${p.name}\`** — ${p.desc}`), "");
   }
   lines.push("Example:", "", "```ts", ...INIT.example, "```", "");
+
+  if (bindingRows?.length) {
+    lines.push("### Runtime binding map", "");
+    lines.push(
+      "Every `[JSExport]` member of the wasm facade and the surface member it powers.",
+      "Generated from `runtime-meta.json` + `mappings.ts`; the drift gate fails",
+      "when either side changes without the other.",
+      "",
+    );
+    lines.push("| Wasm export | Surface | Note |", "| --- | --- | --- |");
+    for (const row of bindingRows) {
+      lines.push(`| \`${row.export}\` | \`${esc(row.target)}\` | ${row.note ?? ""} |`);
+    }
+    lines.push("");
+  }
   return lines.join("\n");
 }
 

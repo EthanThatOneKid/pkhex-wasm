@@ -16,6 +16,7 @@ export interface PkHexApiExports {
   GameTrainerId(game: number): number;
   GameTrainerSecretId(game: number): number;
   GameTrainerGender(game: number): string;
+  GameMoney(game: number): number;
   GameBoxCount(game: number): number;
   GameGeneration(game: number): string;
   GameBoxMonHandles(game: number, boxIndex: number): Int32Array;

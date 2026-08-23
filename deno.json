@@ -1,6 +1,7 @@
 {
   "tasks": {
     "doc": "deno doc --html --name=pkhex-wasm --output=./_docs/ docs/api/pkhex-wasm.d.ts",
+    "reflect": "dotnet run --project tools/reflector -c Release",
     "gen": "deno run -A tools/apigen/gen.ts",
     "gen:check": "deno run -A tools/apigen/gen.ts --check",
     "apigen:test": "deno test -A tools/apigen/",

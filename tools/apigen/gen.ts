@@ -7,11 +7,16 @@
  *                          differs from what the model produces now
  */
 
+import { TYPES } from "./model.ts";
 import { emitDts } from "./emit-dts.ts";
 import { emitSkeletonAll } from "./emit-skeleton.ts";
-import { buildApiReference, stitch } from "./emit-spec.ts";
+import { buildApiReference, stitch, type BindingRow } from "./emit-spec.ts";
+import { BINDING_MAPPINGS } from "./mappings.ts";
+import { surfacePaths, validateBinding } from "./validate.ts";
+import type { RuntimeMetaLike } from "./model-types.ts";
 
-const ROOT = fromFileUrl(new URL("../../", import.meta.url));
+const ROOT_URL = new URL("../../", import.meta.url);
+const ROOT = fromFileUrl(ROOT_URL);
 const SECTIONS_DIR = new URL("./sections/", import.meta.url);
 
 function fromFileUrl(url: URL): string {
@@ -30,6 +35,26 @@ function loadSections(): string[] {
   );
 }
 
+const META_PATH = "tools/apigen/runtime-meta.json";
+
+/** Inverted drift gate: the runtime export set and the mapping table must agree. */
+export function loadAndValidateBinding(): BindingRow[] {
+  const meta = JSON.parse(Deno.readTextFileSync(fromFileUrl(new URL(META_PATH, ROOT_URL)))) as RuntimeMetaLike;
+  const problems = validateBinding(meta, BINDING_MAPPINGS, surfacePaths(TYPES));
+  if (problems.length) {
+    throw new Error(
+      `binding drift (${problems.length}):\n` +
+        problems.map((p) => `  [${p.kind}] ${p.detail}`).join("\n"),
+    );
+  }
+  return meta.methods
+    .map((m) => {
+      const mapping = BINDING_MAPPINGS.find((b) => b.export === m.name)!;
+      return { export: m.name, target: mapping.target, note: mapping.note };
+    })
+    .sort((a, b) => (a.target < b.target ? -1 : a.target > b.target ? 1 : 0));
+}
+
 /** Every artifact the generator owns. */
 export function computeOutputs(): Map<string, string> {
   const out = new Map<string, string>();
@@ -37,7 +62,8 @@ export function computeOutputs(): Map<string, string> {
   for (const [k, v] of emitSkeletonAll()) out.set(k, v);
   const spec = stitch(
     loadSections(),
-    `${buildApiReference()}\n`,
+    `${buildApiReference(loadAndValidateBinding())}
+`,
   );
   out.set("docs/spec/v1-api.md", spec);
   return out;

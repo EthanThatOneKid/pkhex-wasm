@@ -13,7 +13,9 @@ public static partial class PkHexExports
     [JSExport]
     public static string GetApiVersion() => PKHexApi.GetApiVersion();
 
+    /// <summary>Parses one complete logical save buffer; defensive copy at the boundary.</summary>
     [JSExport]
+    [JsThrows("SaveParseError", "when the bytes match no supported format")]
     public static int Load(byte[] saveBytes) => PKHexApi.Load(saveBytes);
 
     [JSExport]
@@ -37,13 +39,19 @@ public static partial class PkHexExports
     [JSExport]
     public static string GameTrainerGender(int game) => PKHexApi.GameTrainerGender(game);
 
+    /// <summary>Money held by the trainer, when the format tracks it.</summary>
+    [JSExport]
+    public static int GameMoney(int game) => PKHexApi.GameMoney(game);
+
     [JSExport]
     public static int GameBoxCount(int game) => PKHexApi.GameBoxCount(game);
 
     [JSExport]
     public static string GameGeneration(int game) => PKHexApi.GameGeneration(game);
 
+    /// <summary>Snapshot of one storage box as entity handles; empty slots are absent.</summary>
     [JSExport]
+    [JsThrows("RangeError", "when boxIndex is outside [0, boxCount)")]
     public static int[] GameBoxMonHandles(int game, int boxIndex) => PKHexApi.GameBoxMonHandles(game, boxIndex);
 
     [JSExport]
@@ -64,6 +72,7 @@ public static partial class PkHexExports
     [JSExport]
     public static string MonGender(int mon) => PKHexApi.MonGender(mon);
 
+    /// <summary>Nature id, or -1 where the concept does not exist (Gen 1-2).</summary>
     [JSExport]
     public static int MonNatureId(int mon) => PKHexApi.MonNatureId(mon);
 
@@ -79,15 +88,19 @@ public static partial class PkHexExports
     [JSExport]
     public static string MonOwnerGender(int mon) => PKHexApi.MonOwnerGender(mon);
 
+    /// <summary>Individual values in Core wire order [HP, Atk, Def, Spe, SpA, SpD].</summary>
     [JSExport]
     public static int[] MonIVs(int mon) => PKHexApi.MonIVs(mon);
 
+    /// <summary>Effort values in Core wire order [HP, Atk, Def, Spe, SpA, SpD].</summary>
     [JSExport]
     public static int[] MonEVs(int mon) => PKHexApi.MonEVs(mon);
 
+    /// <summary>Computed battle stats in Core wire order [HP, Atk, Def, Spe, SpA, SpD].</summary>
     [JSExport]
     public static int[] MonStats(int mon) => PKHexApi.MonStats(mon);
 
+    /// <summary>Four move slots flattened as [moveId, pp] x4.</summary>
     [JSExport]
     public static int[] MonMoveSlots(int mon) => PKHexApi.MonMoveSlots(mon);
 
@@ -100,15 +113,22 @@ public static partial class PkHexExports
     [JSExport]
     public static void MonSetMoves(int mon, int[] moveIds) => PKHexApi.MonSetMoves(mon, moveIds);
 
+    /// <summary>Mint-aware nature writes land with tier enforcement (#22).</summary>
     [JSExport]
+    [JsThrows("NotSupportedException", "until mint-aware nature writes land with tier enforcement")]
     public static void MonSetNature(int mon, int natureId) => PKHexApi.MonSetNature(mon, natureId);
 
+    /// <summary>PID manipulation on Gen 3+; Gen 1-2 shiny derives from DVs.</summary>
     [JSExport]
+    [JsThrows("NotSupportedException", "when unsetting shiny on Gen 1-2 formats (upstream hazard)")]
+    [JsThrows("UnsupportedTierError", "on read-only-tier saves once tiers land (#22)")]
     public static void MonSetShiny(int mon, bool shiny) => PKHexApi.MonSetShiny(mon, shiny);
 
+    /// <summary>Merges individual values; omitted stats keep theirs. Clamps per generation.</summary>
     [JSExport]
     public static void MonSetIVs(int mon, int[] ivs) => PKHexApi.MonSetIVs(mon, ivs);
 
+    /// <summary>Merges effort values; omitted stats keep theirs. Caps per generation.</summary>
     [JSExport]
     public static void MonSetEVs(int mon, int[] evs) => PKHexApi.MonSetEVs(mon, evs);
 }

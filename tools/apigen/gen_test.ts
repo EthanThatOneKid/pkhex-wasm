@@ -1,7 +1,9 @@
 import assert from "node:assert";
-import { computeOutputs, isPerpetual } from "./gen.ts";
+import { computeOutputs, isPerpetual, loadAndValidateBinding } from "./gen.ts";
 import { buildApiReference, stitch } from "./emit-spec.ts";
-import { ERROR_NAMES, MUTATOR_NAMES } from "./model.ts";
+import { BINDING_MAPPINGS } from "./mappings.ts";
+import { surfacePaths, validateBinding } from "./validate.ts";
+import { ERROR_NAMES, MUTATOR_NAMES, TYPES } from "./model.ts";
 
 const outputs = computeOutputs();
 
@@ -50,21 +52,16 @@ Deno.test("emitted d.ts preserves tier throw semantics on mutators", () => {
   assert.ok(tierThrows >= 6, `expected ≥6 UnsupportedTierError tags, got ${tierThrows}`);
 });
 
-Deno.test("skeleton implements every member as a seam", () => {
-  for (
-    const [file, expectedMembers] of [
-      ["src/ts/pokemon.ts", 18], // 11 reads + 7 mutators
-      ["src/ts/game.ts", 6], // 4 reads + box + party
-      ["src/ts/pkhex.ts", 6], // load + saveBytes + 3 lookup tables + initPKHex
-    ] as const
-  ) {
-    const text = outputs.get(file)!;
-    assert.ok(text.includes("notImplemented("), `${file}: no seams`);
-    const seamCount = text.split("throw notImplemented(").length - 1;
-    assert.strictEqual(seamCount, expectedMembers, `${file}: seam count`);
+Deno.test("bootstrap emitter still produces complete skeleton seams", () => {
+  // Root modules under src/ts are implementation-OWNED now (write-if-missing),
+  // but the generator's bootstrap output must stay complete for fresh clones
+  // that prune them.
+  const pkhex = outputs.get("src/ts/pkhex.ts")!;
+  assert.ok(pkhex.includes("export async function initPKHex"));
+  assert.ok(pkhex.includes("throw notImplemented("));
+  for (const name of MUTATOR_NAMES) {
+    assert.ok(outputs.get("src/ts/pokemon.ts")!.includes(name));
   }
-  // init function appended to the root module
-  assert.ok(outputs.get("src/ts/pkhex.ts")!.includes("export async function initPKHex"));
 });
 
 Deno.test("spec chapter is stitched at the marker and carries normative sections", () => {
@@ -121,6 +118,41 @@ Deno.test("MoveInfo carries only Core-tracked fields — no power/accuracy (owne
   assert.ok(iface.includes("pp: number"), "MoveInfo.pp missing");
   assert.ok(!/\breadonly power\b/.test(iface), "MoveInfo must not carry power (absent from PKHeX.Core; see #27)");
   assert.ok(!/\breadonly accuracy\b/.test(iface), "MoveInfo must not carry accuracy (absent from PKHeX.Core; see #27)");
+});
+
+Deno.test("binding map — real meta and mappings validate clean", () => {
+  const rows = loadAndValidateBinding(); // throws on any drift
+  assert.ok(rows.length >= 35, `expected the full facade mapped, got ${rows.length}`);
+});
+
+Deno.test("binding map — unmapped export fails the gate", () => {
+  const fakeMeta = {
+    source: "fixture",
+    generatedAt: "test",
+    methodCount: 1,
+    methods: [{ name: "TotallyNewExport", returns: "void", params: [], throws: [], file: "fixture.cs" }],
+  };
+  const problems = validateBinding(fakeMeta, BINDING_MAPPINGS, surfacePaths(TYPES));
+  assert.ok(problems.some((p) => p.kind === "unmapped-export" && p.detail.includes("TotallyNewExport")));
+});
+
+Deno.test("binding map — stale mapping fails the gate", () => {
+  const fakeMeta = {
+    source: "fixture",
+    generatedAt: "test",
+    methodCount: 0,
+    methods: [],
+  };
+  const problems = validateBinding(fakeMeta, BINDING_MAPPINGS, surfacePaths(TYPES));
+  assert.ok(problems.length >= BINDING_MAPPINGS.length);
+  assert.ok(problems.every((p) => p.kind === "stale-mapping"));
+});
+
+Deno.test("spec carries the runtime binding map appendix", () => {
+  const spec = outputs.get("docs/spec/v1-api.md")!;
+  assert.ok(spec.includes("### Runtime binding map"));
+  assert.ok(spec.includes("| `Load` | `PKHex.load` |"));
+  assert.ok(spec.includes("| `GameMoney` | `TrainerInfo.money` |"));
 });
 
 Deno.test("api reference renders throws clauses verbatim", () => {

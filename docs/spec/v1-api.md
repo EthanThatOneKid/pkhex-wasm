@@ -370,6 +370,50 @@ game.box(0)[0].setNickname('Sparky');
 const out = PKHex.saveBytes(game);
 ```
 
+### Runtime binding map
+
+Every `[JSExport]` member of the wasm facade and the surface member it powers.
+Generated from `runtime-meta.json` + `mappings.ts`; the drift gate fails
+when either side changes without the other.
+
+| Wasm export | Surface | Note |
+| --- | --- | --- |
+| `Close` | `(internal)` | optional explicit release; GC-reliant contract unchanged |
+| `GenerateDemoSave` | `(internal)` | dev/demo helper |
+| `GetApiVersion` | `(internal)` | runtime version stamp |
+| `GameBoxMonHandles` | `Game.box` | materializes entity handles per non-empty slot |
+| `GameBoxCount` | `Game.boxCount` |  |
+| `GameGeneration` | `Game.generation` |  |
+| `GamePartyMonHandles` | `Game.party` | materializes entity handles per non-empty slot |
+| `Load` | `PKHex.load` | defensive copy-in happens wasm-side |
+| `SaveBytes` | `PKHex.saveBytes` |  |
+| `MonEVs` | `Pokemon.evs` | wire order translated to StatBlock display order |
+| `MonGender` | `Pokemon.gender` |  |
+| `MonIsShiny` | `Pokemon.isShiny` |  |
+| `MonIVs` | `Pokemon.ivs` | wire order translated to StatBlock display order |
+| `MonLevel` | `Pokemon.level` |  |
+| `MonMoveSlots` | `Pokemon.moves` | flat [id, pp] x4 reshaped into MoveSlot[] |
+| `MonNatureId` | `Pokemon.nature` | -1 sentinel maps to null pre-Gen3 |
+| `MonNickname` | `Pokemon.nickname` |  |
+| `MonOwnerGender` | `Pokemon.owner.gender` |  |
+| `MonOwnerSecretId` | `Pokemon.owner.id.sid` |  |
+| `MonOwnerId` | `Pokemon.owner.id.tid` |  |
+| `MonOwnerName` | `Pokemon.owner.name` |  |
+| `MonSetEVs` | `Pokemon.setEVs` | partial merge resolved client-side |
+| `MonSetIVs` | `Pokemon.setIVs` | partial merge resolved client-side |
+| `MonSetLevel` | `Pokemon.setLevel` | client clamps 1..100 before the call |
+| `MonSetMoves` | `Pokemon.setMoves` |  |
+| `MonSetNature` | `Pokemon.setNature` | throws until mint-aware writes land (#22) |
+| `MonSetNickname` | `Pokemon.setNickname` |  |
+| `MonSetShiny` | `Pokemon.setShiny` |  |
+| `MonSpecies` | `Pokemon.species` |  |
+| `MonStats` | `Pokemon.stats` |  |
+| `GameTrainerGender` | `TrainerInfo.gender` |  |
+| `GameTrainerSecretId` | `TrainerInfo.id.sid` |  |
+| `GameTrainerId` | `TrainerInfo.id.tid` |  |
+| `GameMoney` | `TrainerInfo.money` |  |
+| `GameTrainerName` | `TrainerInfo.name` |  |
+
 ## Crypto requirements
 
 Locked by [Choose crypto strategy](https://github.com/EthanThatOneKid/pkhex-wasm/issues/8):

@@ -121,6 +121,10 @@ public static partial class PKHexApi
     [JSExport]
     public static string GameGeneration(int game) => RequireGame(game).Context.ToString();
 
+    /// <summary>Money held by the trainer, when the format tracks it.</summary>
+    [JSExport]
+    public static int GameMoney(int game) => (int)RequireGame(game).Money;
+
     /// <summary>Snapshot of one storage box as entity handles; empty slots are absent.</summary>
     [JSExport]
     public static int[] GameBoxMonHandles(int game, int boxIndex)

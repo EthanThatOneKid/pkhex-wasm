@@ -1,0 +1,490 @@
+{
+  "source": "src/PKHexWasm.Wasm (facade)",
+  "generatedAt": "2026-08-23",
+  "methodCount": 35,
+  "methods": [
+    {
+      "name": "Close",
+      "returns": "void",
+      "params": [
+        {
+          "name": "game",
+          "type": "int"
+        }
+      ],
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "GameBoxCount",
+      "returns": "int",
+      "params": [
+        {
+          "name": "game",
+          "type": "int"
+        }
+      ],
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "GameBoxMonHandles",
+      "returns": "int[]",
+      "params": [
+        {
+          "name": "game",
+          "type": "int"
+        },
+        {
+          "name": "boxIndex",
+          "type": "int"
+        }
+      ],
+      "doc": "Snapshot of one storage box as entity handles; empty slots are absent.",
+      "throws": [
+        {
+          "error": "RangeError",
+          "clause": "when boxIndex is outside [0, boxCount)"
+        }
+      ],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "GameGeneration",
+      "returns": "string",
+      "params": [
+        {
+          "name": "game",
+          "type": "int"
+        }
+      ],
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "GameMoney",
+      "returns": "int",
+      "params": [
+        {
+          "name": "game",
+          "type": "int"
+        }
+      ],
+      "doc": "Money held by the trainer, when the format tracks it.",
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "GamePartyMonHandles",
+      "returns": "int[]",
+      "params": [
+        {
+          "name": "game",
+          "type": "int"
+        }
+      ],
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "GameTrainerGender",
+      "returns": "string",
+      "params": [
+        {
+          "name": "game",
+          "type": "int"
+        }
+      ],
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "GameTrainerId",
+      "returns": "int",
+      "params": [
+        {
+          "name": "game",
+          "type": "int"
+        }
+      ],
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "GameTrainerName",
+      "returns": "string",
+      "params": [
+        {
+          "name": "game",
+          "type": "int"
+        }
+      ],
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "GameTrainerSecretId",
+      "returns": "int",
+      "params": [
+        {
+          "name": "game",
+          "type": "int"
+        }
+      ],
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "GenerateDemoSave",
+      "returns": "byte[]",
+      "params": [
+        {
+          "name": "trainerName",
+          "type": "string"
+        }
+      ],
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "GetApiVersion",
+      "returns": "string",
+      "params": [],
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "Load",
+      "returns": "int",
+      "params": [
+        {
+          "name": "saveBytes",
+          "type": "byte[]"
+        }
+      ],
+      "doc": "Parses one complete logical save buffer; defensive copy at the boundary.",
+      "throws": [
+        {
+          "error": "SaveParseError",
+          "clause": "when the bytes match no supported format"
+        }
+      ],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "MonEVs",
+      "returns": "int[]",
+      "params": [
+        {
+          "name": "mon",
+          "type": "int"
+        }
+      ],
+      "doc": "Effort values in Core wire order [HP, Atk, Def, Spe, SpA, SpD].",
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "MonGender",
+      "returns": "string",
+      "params": [
+        {
+          "name": "mon",
+          "type": "int"
+        }
+      ],
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "MonIVs",
+      "returns": "int[]",
+      "params": [
+        {
+          "name": "mon",
+          "type": "int"
+        }
+      ],
+      "doc": "Individual values in Core wire order [HP, Atk, Def, Spe, SpA, SpD].",
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "MonIsShiny",
+      "returns": "bool",
+      "params": [
+        {
+          "name": "mon",
+          "type": "int"
+        }
+      ],
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "MonLevel",
+      "returns": "int",
+      "params": [
+        {
+          "name": "mon",
+          "type": "int"
+        }
+      ],
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "MonMoveSlots",
+      "returns": "int[]",
+      "params": [
+        {
+          "name": "mon",
+          "type": "int"
+        }
+      ],
+      "doc": "Four move slots flattened as [moveId, pp] x4.",
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "MonNatureId",
+      "returns": "int",
+      "params": [
+        {
+          "name": "mon",
+          "type": "int"
+        }
+      ],
+      "doc": "Nature id, or -1 where the concept does not exist (Gen 1-2).",
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "MonNickname",
+      "returns": "string",
+      "params": [
+        {
+          "name": "mon",
+          "type": "int"
+        }
+      ],
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "MonOwnerGender",
+      "returns": "string",
+      "params": [
+        {
+          "name": "mon",
+          "type": "int"
+        }
+      ],
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "MonOwnerId",
+      "returns": "int",
+      "params": [
+        {
+          "name": "mon",
+          "type": "int"
+        }
+      ],
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "MonOwnerName",
+      "returns": "string",
+      "params": [
+        {
+          "name": "mon",
+          "type": "int"
+        }
+      ],
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "MonOwnerSecretId",
+      "returns": "int",
+      "params": [
+        {
+          "name": "mon",
+          "type": "int"
+        }
+      ],
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "MonSetEVs",
+      "returns": "void",
+      "params": [
+        {
+          "name": "mon",
+          "type": "int"
+        },
+        {
+          "name": "evs",
+          "type": "int[]"
+        }
+      ],
+      "doc": "Merges effort values; omitted stats keep theirs. Caps per generation.",
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "MonSetIVs",
+      "returns": "void",
+      "params": [
+        {
+          "name": "mon",
+          "type": "int"
+        },
+        {
+          "name": "ivs",
+          "type": "int[]"
+        }
+      ],
+      "doc": "Merges individual values; omitted stats keep theirs. Clamps per generation.",
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "MonSetLevel",
+      "returns": "void",
+      "params": [
+        {
+          "name": "mon",
+          "type": "int"
+        },
+        {
+          "name": "level",
+          "type": "int"
+        }
+      ],
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "MonSetMoves",
+      "returns": "void",
+      "params": [
+        {
+          "name": "mon",
+          "type": "int"
+        },
+        {
+          "name": "moveIds",
+          "type": "int[]"
+        }
+      ],
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "MonSetNature",
+      "returns": "void",
+      "params": [
+        {
+          "name": "mon",
+          "type": "int"
+        },
+        {
+          "name": "natureId",
+          "type": "int"
+        }
+      ],
+      "doc": "Mint-aware nature writes land with tier enforcement (#22).",
+      "throws": [
+        {
+          "error": "NotSupportedException",
+          "clause": "until mint-aware nature writes land with tier enforcement"
+        }
+      ],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "MonSetNickname",
+      "returns": "void",
+      "params": [
+        {
+          "name": "mon",
+          "type": "int"
+        },
+        {
+          "name": "nickname",
+          "type": "string"
+        }
+      ],
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "MonSetShiny",
+      "returns": "void",
+      "params": [
+        {
+          "name": "mon",
+          "type": "int"
+        },
+        {
+          "name": "shiny",
+          "type": "bool"
+        }
+      ],
+      "doc": "PID manipulation on Gen 3\u002B; Gen 1-2 shiny derives from DVs.",
+      "throws": [
+        {
+          "error": "NotSupportedException",
+          "clause": "when unsetting shiny on Gen 1-2 formats (upstream hazard)"
+        },
+        {
+          "error": "UnsupportedTierError",
+          "clause": "on read-only-tier saves once tiers land (#22)"
+        }
+      ],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "MonSpecies",
+      "returns": "int",
+      "params": [
+        {
+          "name": "mon",
+          "type": "int"
+        }
+      ],
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "MonStats",
+      "returns": "int[]",
+      "params": [
+        {
+          "name": "mon",
+          "type": "int"
+        }
+      ],
+      "doc": "Computed battle stats in Core wire order [HP, Atk, Def, Spe, SpA, SpD].",
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "SaveBytes",
+      "returns": "byte[]",
+      "params": [
+        {
+          "name": "game",
+          "type": "int"
+        }
+      ],
+      "throws": [],
+      "file": "PkHexExports.cs"
+    }
+  ]
+}
