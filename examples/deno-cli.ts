@@ -25,14 +25,19 @@ if (!path) {
 try {
   const saveBytes = Deno.readFileSync(path);
 
+  // Pre-packaging dev flow: point PKHEX_WASM_BASE_URL at a published
+  // `_framework/` directory (after tools/normalize-publish.mjs).
+  const baseUrl = Deno.env.get("PKHEX_WASM_BASE_URL");
+
   // One-time async init; everything after this line is synchronous.
-  const PKHex = await initPKHex();
+  const PKHex = await initPKHex(baseUrl ? { wasmBaseUrl: baseUrl } : undefined);
   const game = PKHex.load(saveBytes);
 
   console.log(`${game.trainer.name}'s party (${game.generation})`);
   for (const mon of game.party()) {
-    const species = PKHex.species.get(mon.species.id)?.name ?? mon.species.name;
-    const nickname = mon.nickname || species;
+    const tableName = PKHex.species.get(mon.species.id)?.name;
+    const species = mon.species.name || tableName || `#${mon.species.id}`;
+    const nickname = mon.nickname || species || `#${mon.species.id}`;
     const shiny = mon.isShiny ? " \u2605" : "";
     console.log(`  ${nickname} \u2014 ${species} \u00b7 Lv ${mon.level}${shiny}`);
   }

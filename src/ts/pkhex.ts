@@ -1,60 +1,153 @@
-import { Game, InitOptions, LookupTable, MoveInfo, NatureInfo, PKHex, SpeciesInfo } from "./gen/types.ts";
-import { notImplemented } from "./gen/errors.ts";
-
+﻿import type { Game, InitOptions, LookupTable, PKHex } from "./gen/types.ts";
+import { SaveParseError } from "./gen/errors.ts";
+import { GameHandle } from "./game.ts";
 /**
- * Synchronous API root created by {@link initPKHex}.
- *
- * Owns the wasm runtime instance; every operation here is synchronous
- * after the one-time async init.
- *
- * @generated-skeleton — bodies are seams; implementation sessions replace them.
+ * Minimal structural view of the wasm-side static exports. The full surface
+ * is described in src/PKHexWasm/PKHexApi.cs; when the reflection mechanism
+ * (#14 phase 1) lands, this interface becomes generated.
  */
-export class PKHexImpl implements PKHex {
-    /** Global species table (national dex). */
-    get species(): LookupTable<SpeciesInfo> {
-        throw notImplemented("build-time JSON hydrated at init");
-    }
+export interface PkHexApiExports {
+  GetApiVersion(): string;
+  Load(saveBytes: Uint8Array): number;
+  SaveBytes(game: number): Uint8Array;
+  GenerateDemoSave(trainerName: string): Uint8Array;
 
-    /** Global nature table. */
-    get natures(): LookupTable<NatureInfo> {
-        throw notImplemented("build-time JSON hydrated at init");
-    }
+  GameTrainerName(game: number): string;
+  GameTrainerId(game: number): number;
+  GameTrainerSecretId(game: number): number;
+  GameTrainerGender(game: number): string;
+  GameBoxCount(game: number): number;
+  GameGeneration(game: number): string;
+  GameBoxMonHandles(game: number, boxIndex: number): Int32Array;
+  GamePartyMonHandles(game: number): Int32Array;
 
-    /** Global move table. */
-    get moves(): LookupTable<MoveInfo> {
-        throw notImplemented("build-time JSON hydrated at init");
-    }
+  MonSpecies(mon: number): number;
+  MonNickname(mon: number): string;
+  MonLevel(mon: number): number;
+  MonIsShiny(mon: number): boolean;
+  MonGender(mon: number): string;
+  MonNatureId(mon: number): number;
+  MonOwnerName(mon: number): string;
+  MonOwnerId(mon: number): number;
+  MonOwnerSecretId(mon: number): number;
+  MonOwnerGender(mon: number): string;
+  MonIVs(mon: number): Int32Array;
+  MonEVs(mon: number): Int32Array;
+  MonStats(mon: number): Int32Array;
+  MonMoveSlots(mon: number): Int32Array;
 
-    /**
-     * Parse a complete save-file buffer into an editable {@link Game}.
-     *
-     * The input is defensively copied; callers retain ownership of `saveBytes`.
-     *
-     * @param saveBytes one complete logical save buffer (up to ~4.4 MB; Switch-era main/backup/poke_trade files must be assembled by the caller)
-     * @throws {SaveParseError} when the bytes match no supported format
-     */
-    load(saveBytes: Uint8Array): Game {
-        throw notImplemented("copy-in buffer → SaveUtil.GetSaveFile");
-    }
+  MonSetNickname(mon: number, nickname: string): void;
+  MonSetLevel(mon: number, level: number): void;
+  MonSetMoves(mon: number, moveIds: Int32Array): void;
+  MonSetNature(mon: number, natureId: number): void;
+  MonSetShiny(mon: number, shiny: boolean): void;
+  MonSetIVs(mon: number, ivs: Int32Array): void;
+  MonSetEVs(mon: number, evs: Int32Array): void;
+}
 
-    /** Serialize a game back to a fresh save-file byte array. Every call returns a new `Uint8Array`; nothing aliases prior exports. */
-    saveBytes(game: Game): Uint8Array {
-        throw notImplemented("SaveFile.Write() → fresh byte[] marshaled out");
-    }
+interface DotnetRuntime {
+  getConfig(): { mainAssemblyName: string };
+  getAssemblyExports(name: string): Promise<Record<string, unknown>>;
+}
+
+let cachedRootPromise: Promise<PKHex> | null = null;
+
+function emptyTable<T>(): LookupTable<T> {
+  return {
+    size: 0,
+    get: () => undefined,
+    all: () => [],
+  };
+}
+
+/** Hydrated by the Lookup-table pipeline; universal tables ship empty until then. */
+const EMPTY_SPECIES = emptyTable<import("./gen/types.ts").SpeciesInfo>();
+const EMPTY_NATURES = emptyTable<import("./gen/types.ts").NatureInfo>();
+const EMPTY_MOVES = emptyTable<import("./gen/types.ts").MoveInfo>();
+
+/** Dynamic import() needs a real URL scheme — convert bare filesystem paths. */
+function toModuleUrlBase(base: string): string {
+  // A single leading letter + colon is a Windows drive, not a scheme.
+  const isDrivePath = /^[a-z]:[\\/]/i.test(base);
+  const hasScheme = /^[a-z][a-z0-9+.-]+:/i.test(base) && !isDrivePath;
+  if (hasScheme) return base;
+  return `file://${base.replace(/\\/g, "/").replace(/^\/(?=[A-Za-z]:)/, "")}`;
 }
 
 /**
- * Initialize the wasm runtime exactly once; every subsequent operation on the returned root is synchronous.
+ * Initialize the wasm runtime exactly once; every subsequent operation on the
+ * returned root is synchronous.
  *
- * Wires the wasm runtime, registers Managed crypto providers, and hydrates
- * the Lookup tables before returning the synchronous root.
+ * Bootstraps the wasm runtime and returns the synchronous root. Managed-crypto
+ * provider registration and Lookup-table hydration land with their respective
+ * work; Gen 1-6 paths never touch them (zero cost when unused).
  *
  * @param options runtime bootstrap options
- * @generated-skeleton — bodies are seams; implementation sessions replace them.
  */
 export async function initPKHex(options?: InitOptions): Promise<PKHex> {
-  void options;
-  throw notImplemented(
-    "initPKHex: fetch _framework assets, boot runtime, register RuntimeCryptographyProvider.Aes/.Md5, hydrate Lookup tables",
-  );
+  cachedRootPromise ??= createRoot(options);
+  return cachedRootPromise;
+}
+
+async function createRoot(options?: InitOptions): Promise<PKHex> {
+  const rawBase = options?.wasmBaseUrl ??
+    new URL("./wasm/_framework/", import.meta.url).href.replace(/\\/g, "/");
+  const normalized = (() => {
+    const withSlash = rawBase.endsWith("/") ? rawBase : `${rawBase}/`;
+    return toModuleUrlBase(withSlash);
+  })();
+
+  let mod: { dotnet: { create(): Promise<DotnetRuntime> } };
+  try {
+    mod = await import(`${normalized}dotnet.js`);
+  } catch (cause) {
+    throw new Error(
+      `pkhex-wasm: unable to load the wasm runtime from ${normalized}dotnet.js — ${
+        cause instanceof Error ? cause.message : cause
+      }`,
+    );
+  }
+
+  const runtime = await mod.dotnet.create();
+  const config = runtime.getConfig();
+  const allExports = (await runtime.getAssemblyExports(config.mainAssemblyName)) as {
+    PKHexWasm?: { Wasm?: { PkHexExports?: PkHexApiExports } };
+  } & Record<string, unknown>;
+
+  // The [JSExport] facade lives in the app assembly under namespace PKHexWasm.Wasm.
+  const api = allExports.PKHexWasm?.Wasm?.PkHexExports;
+  if (!api) {
+    throw new Error("pkhex-wasm: PKHexWasm.Wasm.PkHexExports not found in the loaded runtime");
+  }
+
+  return new PKHexImpl(api);
+}
+
+export class PKHexImpl implements PKHex {
+  readonly #api: PkHexApiExports;
+
+  constructor(api: PkHexApiExports) {
+    this.#api = api;
+  }
+
+  load(saveBytes: Uint8Array): Game {
+    try {
+      const handle = this.#api.Load(saveBytes);
+      return new GameHandle(handle, this.#api);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      // Only format-recognition failures map to SaveParseError; anything else
+      // is a genuine defect and must surface as itself.
+      if (/unrecognized save file/i.test(message)) throw new SaveParseError(message);
+      throw cause instanceof Error ? cause : new Error(String(cause));
+    }
+  }
+
+  saveBytes(game: Game): Uint8Array {
+    return this.#api.SaveBytes(GameHandle.handleOf(game));
+  }
+
+  readonly species = EMPTY_SPECIES;
+  readonly natures = EMPTY_NATURES;
+  readonly moves = EMPTY_MOVES;
 }

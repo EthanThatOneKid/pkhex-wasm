@@ -4,4 +4,11 @@
     <Project Path="spike/SpikeLib.Tests/SpikeLib.Tests.csproj" />
     <Project Path="spike/SpikeLib/SpikeLib.csproj" />
   </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/PKHexWasm.Wasm/PKHexWasm.Wasm.csproj" />
+    <Project Path="src/PKHexWasm/PKHexWasm.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PKHexWasm.Tests/PKHexWasm.Tests.csproj" />
+  </Folder>
 </Solution>
