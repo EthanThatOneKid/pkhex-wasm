@@ -32,6 +32,6 @@ _Avoid_: "repository", "database"
 The browser-side arrangement of the .NET runtime running Core; committed to bare Mono-wasm (`wasmbrowser`) with no Blazor.
 _Avoid_: "runtime backend"
 
-**Crypto bridge**:
-JavaScript-side synchronous crypto backing `RuntimeCryptographyProvider` where the browser-BCL restricts `System.Security.Cryptography`; a distinct mechanism from the Binding.
-_Avoid_: conflating with the Binding
+**Managed crypto**:
+Vendored pure-C# MD5/AES implementations registered into `RuntimeCryptographyProvider` at init; no JavaScript crypto involvement anywhere.
+_Avoid_: "crypto bridge", "JS bridge"
