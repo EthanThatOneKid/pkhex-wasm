@@ -28,6 +28,14 @@ _Avoid_: "wrapper object", "ref"
 Build-time-generated reference data (species, natures, items) exposed to JS; universal tables are global, game-dependent ones live on the `Game` handle.
 _Avoid_: "repository", "database"
 
+**Edit tier**:
+Generations where every v1 mutator applies (Gen 3–7, SwSh, BDSP, SV, Z-A); natures are written mint-aware.
+_Avoid_: "full support"
+
+**Read-only tier**:
+Generations that load and inspect but reject mutators with descriptive errors (Gen 1–2, LGPE, PLA).
+_Avoid_: "partial support"
+
 **Wasm host**:
 The browser-side arrangement of the .NET runtime running Core; committed to bare Mono-wasm (`wasmbrowser`) with no Blazor.
 _Avoid_: "runtime backend"
