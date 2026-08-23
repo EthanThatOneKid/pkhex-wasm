@@ -252,6 +252,12 @@ public static partial class PKHexApi
                 ErrorTags.Compose(ErrorTags.Range,
                     $"nickname exceeds this generation's {maxNick} character limit"));
         }
+        if (!CanStoreLosslessly(entry.Pk, nickname))
+        {
+            throw new ArgumentOutOfRangeException(nameof(nickname), nickname,
+                ErrorTags.Compose(ErrorTags.Range,
+                    "nickname contains characters this generation cannot store"));
+        }
         CommonEdits.SetNickname(entry.Pk, nickname);
         Flush(entry);
     }
@@ -274,6 +280,16 @@ public static partial class PKHexApi
         if (moveIds.Length != 4)
         {
             throw new ArgumentException("exactly four move ids are required", nameof(moveIds));
+        }
+        var maxMove = entry.Pk.MaxMoveID;
+        foreach (var id in moveIds)
+        {
+            if ((uint)id > maxMove) // 0 is the cleared-slot sentinel and stays legal
+            {
+                throw new ArgumentOutOfRangeException(nameof(moveIds), id,
+                    ErrorTags.Compose(ErrorTags.Range,
+                        $"move id {id} is unknown to this generation's movepool"));
+            }
         }
         entry.Pk.Move1 = (ushort)moveIds[0];
         entry.Pk.Move2 = (ushort)moveIds[1];
@@ -363,6 +379,26 @@ public static partial class PKHexApi
         if (entry.Pk.Context.Tier() == SupportTier.ReadOnly)
         {
             throw new UnsupportedTierException(operation, entry.Pk.Context.ToString());
+        }
+    }
+
+    /// <summary>
+    /// Charset guard: a value is storable only when the entity's own format
+    /// codec round-trips it losslessly - upstream setters otherwise truncate
+    /// or drop unmappable characters silently.
+    /// </summary>
+    private static bool CanStoreLosslessly(PKM pk, string value)
+    {
+        Span<byte> buffer = stackalloc byte[(value.Length + 4) * 2];
+        buffer.Clear();
+        try
+        {
+            pk.SetString(buffer, value, value.Length, StringConverterOption.None);
+            return pk.GetString(buffer) == value;
+        }
+        catch
+        {
+            return false;
         }
     }
 

@@ -401,6 +401,10 @@
         {
           "error": "UnsupportedTierError",
           "clause": "on read-only-tier saves"
+        },
+        {
+          "error": "RangeError",
+          "clause": "when an id is unknown to this generation\u0027s movepool"
         }
       ],
       "file": "PkHexExports.cs"

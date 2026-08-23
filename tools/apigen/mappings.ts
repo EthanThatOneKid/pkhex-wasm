@@ -52,7 +52,7 @@ export const BINDING_MAPPINGS: BindingMapping[] = [
 
   { export: "MonSetNickname", target: "Pokemon.setNickname", note: "rejects beyond the generation's length cap" },
   { export: "MonSetLevel", target: "Pokemon.setLevel", note: "client clamps 1..100 before the call" },
-  { export: "MonSetMoves", target: "Pokemon.setMoves" },
+  { export: "MonSetMoves", target: "Pokemon.setMoves", note: "ids validated against the generation's movepool" },
   { export: "MonSetNature", target: "Pokemon.setNature", note: "mint-aware: nature + stat alignment written together" },
   { export: "MonSetShiny", target: "Pokemon.setShiny" },
   { export: "MonSetIVs", target: "Pokemon.setIVs", note: "partial merge resolved client-side" },

@@ -115,6 +115,7 @@ public static partial class PkHexExports
 
     [JSExport]
     [JsThrows("UnsupportedTierError", "on read-only-tier saves")]
+    [JsThrows("RangeError", "when an id is unknown to this generation's movepool")]
     public static void MonSetMoves(int mon, int[] moveIds) => PKHexApi.MonSetMoves(mon, moveIds);
 
     /// <summary>Mint-aware write: sets nature and stat alignment together.</summary>
