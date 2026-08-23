@@ -2,7 +2,7 @@
 
 PKHeX.Core Pokémon save editing, compiled to WebAssembly and packaged for npm — so JavaScript apps can load, read, edit, and export save files entirely in the browser.
 
-> **Status: research preview.** Not yet published to npm. The technical approach is locked (bare Mono-wasm + `[JSExport]`, no Blazor) and validated by a runnable spike; the public JS API surface is still being designed on the [wayfinder map](https://github.com/EthanThatOneKid/pkhex-wasm/issues/1). Expect breaking changes until v1.
+> **Status: v1 specification locked.** The full JS API contract lives at [`docs/spec/v1-api.md`](docs/spec/v1-api.md) — hosting, transport, crypto, support tiers, testing and packaging gates are all decided ([wayfinder map](https://github.com/EthanThatOneKid/pkhex-wasm/issues/1)). Not yet published to npm; implementation is underway from the locked spec. Browsable API docs: <https://ethanthatonekid.github.io/pkhex-wasm/>
 
 ## What works today
 
@@ -44,7 +44,11 @@ In the page: **Generate demo save** creates a blank Gen 1 save with a level-5 Pi
 ## Development
 
 ```bash
-dotnet test pkhex-wasm.slnx
+dotnet test pkhex-wasm.slnx   # C# logic-seam suite
+deno task gen                 # regenerate d.ts + binding skeleton + spec chapter
+deno task gen:check           # drift gate — fails when outputs lag the model
+deno task apigen:test         # generator tests
+deno task doc                 # rebuild the docs site input locally
 ```
 
 | Path | What it is |
@@ -52,17 +56,14 @@ dotnet test pkhex-wasm.slnx
 | `spike/SpikeLib` | Save logic over PKHeX.Core (generate / load / read / edit / export), no interop concerns |
 | `spike/SpikeLib.Tests` | xUnit tests for the logic seam |
 | `spike/SpikeApp` | `wasmbrowser` host exposing the logic via `[JSExport]`, plus a minimal HTML UI |
+| `tools/apigen` | API model + ts-morph generators — single source of truth for the v1 surface |
+| `src/ts` | TypeScript binding skeleton bootstrapped by the generator (`gen/` stays generated) |
+| `docs/spec/v1-api.md` | The locked v1 JavaScript API specification |
 | `external/PKHeX.Everywhere` | Vendored upstream (MIT facade/web layers wrapping the GPLv3 `PKHeX.Core` fork, itself a nested submodule) |
 
 ## Roadmap
 
-Open decisions are tracked as tickets on the wayfinder map ([#1](https://github.com/EthanThatOneKid/pkhex-wasm/issues/1)):
-
-- [Define v1 JS API surface over PKHeX.Facade](https://github.com/EthanThatOneKid/pkhex-wasm/issues/7)
-- [Choose crypto strategy (managed in-bundle vs JS bridge)](https://github.com/EthanThatOneKid/pkhex-wasm/issues/8)
-- [Choose save-byte transfer mechanics across the JS↔wasm boundary](https://github.com/EthanThatOneKid/pkhex-wasm/issues/9)
-
-Once those land, this repo becomes an npm package with a documented, versioned JS API.
+Every decision feeding v1 is resolved — see [Decisions so far](https://github.com/EthanThatOneKid/pkhex-wasm/issues/1) on the map. Next: implementation sessions building against [`docs/spec/v1-api.md`](docs/spec/v1-api.md), then npm publication under the packaging gates it defines.
 
 ## License
 
