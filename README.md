@@ -58,6 +58,7 @@ deno task doc                 # rebuild the docs site input locally
 | `spike/SpikeApp` | `wasmbrowser` host exposing the logic via `[JSExport]`, plus a minimal HTML UI |
 | `tools/apigen` | API model + ts-morph generators — single source of truth for the v1 surface |
 | `src/ts` | TypeScript binding skeleton bootstrapped by the generator (`gen/` stays generated) |
+| `examples/deno-cli.ts` | Minimal CLI usage: print a save's party (`deno run -A examples/deno-cli.ts <save>`) |
 | `docs/spec/v1-api.md` | The locked v1 JavaScript API specification |
 | `external/PKHeX.Everywhere` | Vendored upstream (MIT facade/web layers wrapping the GPLv3 `PKHeX.Core` fork, itself a nested submodule) |
 
