@@ -180,13 +180,11 @@ Nature entry in the global nature table.
 
 Extends: `LookupRef`
 
-Move entry in the global move table.
+Move entry in the global move table.  Carries only what Core itself tracks (type, PP). Base power and accuracy are absent from PKHeX.Core; sourcing them externally is tracked as a post-v1 enhancement.
 
 | Member | Type | Description |
 | --- | --- | --- |
 | `type` | `string` | Move type. |
-| `power` | `number \| null` | Base power; null when variable or fixed. |
-| `accuracy` | `number \| null` | Accuracy; null when it never misses. |
 | `pp` | `number` | Base power points. |
 
 ### `ItemInfo`

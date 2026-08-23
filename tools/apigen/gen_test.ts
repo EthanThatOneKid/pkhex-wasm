@@ -111,6 +111,18 @@ Deno.test("perpetual vs bootstrap classification", () => {
   assert.ok(!isPerpetual("src/ts/pokemon.ts"));
 });
 
+Deno.test("MoveInfo carries only Core-tracked fields — no power/accuracy (owner adjudication on #19)", () => {
+  const moveInfo = outputs.get("docs/api/pkhex-wasm.d.ts")!;
+  const iface = moveInfo.slice(
+    moveInfo.indexOf("export interface MoveInfo"),
+    moveInfo.indexOf("}", moveInfo.indexOf("export interface MoveInfo")),
+  );
+  assert.ok(iface.includes("type: string"), "MoveInfo.type missing");
+  assert.ok(iface.includes("pp: number"), "MoveInfo.pp missing");
+  assert.ok(!/\breadonly power\b/.test(iface), "MoveInfo must not carry power (absent from PKHeX.Core; see #27)");
+  assert.ok(!/\breadonly accuracy\b/.test(iface), "MoveInfo must not carry accuracy (absent from PKHeX.Core; see #27)");
+});
+
 Deno.test("api reference renders throws clauses verbatim", () => {
   const chapter = buildApiReference();
   assert.ok(chapter.includes("`UnsupportedTierError` — on read-only-tier saves"));

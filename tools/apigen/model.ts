@@ -257,11 +257,15 @@ export const TYPES: InterfaceModel[] = [
   {
     name: "MoveInfo",
     extends: ["LookupRef"],
-    doc: ["Move entry in the global move table."],
+    doc: [
+      "Move entry in the global move table.",
+      "",
+      "Carries only what Core itself tracks (type, PP). Base power and accuracy",
+      "are absent from PKHeX.Core; sourcing them externally is tracked as a",
+      "post-v1 enhancement.",
+    ],
     members: [
       { kind: "prop", name: "type", type: "string", summary: "Move type." },
-      { kind: "prop", name: "power", type: "number | null", summary: "Base power; null when variable or fixed." },
-      { kind: "prop", name: "accuracy", type: "number | null", summary: "Accuracy; null when it never misses." },
       { kind: "prop", name: "pp", type: "number", summary: "Base power points." },
     ],
   },

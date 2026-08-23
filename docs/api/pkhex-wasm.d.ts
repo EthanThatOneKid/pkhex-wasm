@@ -91,14 +91,10 @@ export interface NatureInfo extends LookupRef {
     readonly statMultipliers: { attack: number; defense: number; speed: number; specialAttack: number; specialDefense: number };
 }
 
-/** Move entry in the global move table. */
+/** Move entry in the global move table.  Carries only what Core itself tracks (type, PP). Base power and accuracy are absent from PKHeX.Core; sourcing them externally is tracked as a post-v1 enhancement. */
 export interface MoveInfo extends LookupRef {
     /** Move type. */
     readonly type: string;
-    /** Base power; null when variable or fixed. */
-    readonly power: number | null;
-    /** Accuracy; null when it never misses. */
-    readonly accuracy: number | null;
     /** Base power points. */
     readonly pp: number;
 }
