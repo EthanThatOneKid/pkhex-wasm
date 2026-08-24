@@ -1,13 +1,7 @@
 import type { Game, ItemInfo, LookupTable, Pokemon, StatBlock, TrainerInfo } from "./gen/types.ts";
 import type { PkHexApiExports } from "./pkhex.ts";
 import { PokemonHandle } from "./pokemon.ts";
-
-/** Hydrated by the Lookup-table pipeline; per-game item tables ship empty until then. */
-const EMPTY_ITEMS = (): LookupTable<ItemInfo> => ({
-  size: 0,
-  get: () => undefined,
-  all: () => [],
-});
+import { itemsForGeneration } from "./tables.ts";
 
 /** Wire order of stat arrays across the Binding: [HP, Atk, Def, Spe, SpA, SpD]. */
 export const WIRE_ORDER = [0, 1, 2, 3, 4, 5] as const;
@@ -86,5 +80,8 @@ export class GameHandle implements Game {
     return this.#api.GameGeneration(this.#handle);
   }
 
-  readonly items: LookupTable<ItemInfo> = EMPTY_ITEMS();
+  /** Per-game item table, version-scoped by this save's generation context. */
+  get items(): LookupTable<ItemInfo> {
+    return itemsForGeneration(this.generation);
+  }
 }

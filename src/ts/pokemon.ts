@@ -1,6 +1,7 @@
 import type { LookupRef, MoveSlot, Pokemon, StatBlock } from "./gen/types.ts";
 import type { PkHexApiExports } from "./pkhex.ts";
 import { UnsupportedOperationError, UnsupportedTierError } from "./gen/errors.ts";
+import { movesTable, naturesTable, speciesTable } from "./tables.ts";
 import { displayToWire, wireToDisplay } from "./game.ts";
 
 /**
@@ -51,9 +52,8 @@ export class PokemonHandle implements Pokemon {
   }
 
   get species(): LookupRef {
-    // Species display names resolve through the global table once hydrated;
-    // until then the numeric id is the honest answer.
-    return { id: this.#api.MonSpecies(this.#handle), name: "" };
+    const id = this.#api.MonSpecies(this.#handle);
+    return { id, name: speciesTable.get(id)?.name ?? "" };
   }
 
   get nickname(): string {
@@ -88,8 +88,9 @@ export class PokemonHandle implements Pokemon {
     const flat = this.#api.MonMoveSlots(this.#handle);
     const slots: MoveSlot[] = [];
     for (let i = 0; i < 4; i++) {
+      const id = flat[i * 2];
       slots.push({
-        move: { id: flat[i * 2], name: "" },
+        move: { id, name: movesTable.get(id)?.name ?? "" },
         pp: flat[i * 2 + 1],
       });
     }
@@ -99,7 +100,7 @@ export class PokemonHandle implements Pokemon {
   /** Nature reference, or `null` before Gen 3 (concept absent). */
   get nature(): LookupRef | null {
     const id = this.#api.MonNatureId(this.#handle);
-    return id < 0 ? null : { id, name: "" };
+    return id < 0 ? null : { id, name: naturesTable.get(id)?.name ?? "" };
   }
 
   get owner(): TrainerRefShape {

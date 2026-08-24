@@ -1,6 +1,9 @@
-﻿import type { Game, InitOptions, LookupTable, PKHex } from "./gen/types.ts";
+﻿import type { Game, InitOptions, LookupTable, PKHex, SpeciesInfo } from "./gen/types.ts";
+import type { NatureInfo } from "./gen/types.ts";
+import type { MoveInfo } from "./gen/types.ts";
 import { SaveParseError } from "./gen/errors.ts";
 import { GameHandle } from "./game.ts";
+import { movesTable, naturesTable, speciesTable } from "./tables.ts";
 /**
  * Minimal structural view of the wasm-side static exports. The full surface
  * is described in src/PKHexWasm/PKHexApi.cs; when the reflection mechanism
@@ -53,19 +56,6 @@ interface DotnetRuntime {
 }
 
 let cachedRootPromise: Promise<PKHex> | null = null;
-
-function emptyTable<T>(): LookupTable<T> {
-  return {
-    size: 0,
-    get: () => undefined,
-    all: () => [],
-  };
-}
-
-/** Hydrated by the Lookup-table pipeline; universal tables ship empty until then. */
-const EMPTY_SPECIES = emptyTable<import("./gen/types.ts").SpeciesInfo>();
-const EMPTY_NATURES = emptyTable<import("./gen/types.ts").NatureInfo>();
-const EMPTY_MOVES = emptyTable<import("./gen/types.ts").MoveInfo>();
 
 /** Dynamic import() needs a real URL scheme — convert bare filesystem paths. */
 function toModuleUrlBase(base: string): string {
@@ -153,7 +143,7 @@ export class PKHexImpl implements PKHex {
     return this.#api.SaveBytes(GameHandle.handleOf(game));
   }
 
-  readonly species = EMPTY_SPECIES;
-  readonly natures = EMPTY_NATURES;
-  readonly moves = EMPTY_MOVES;
+  readonly species: LookupTable<SpeciesInfo> = speciesTable;
+  readonly natures: LookupTable<NatureInfo> = naturesTable;
+  readonly moves: LookupTable<MoveInfo> = movesTable;
 }
