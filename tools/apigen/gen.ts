@@ -71,7 +71,7 @@ export function computeOutputs(): Map<string, string> {
 
 /** Files regenerated on every run — safe to overwrite unconditionally. */
 export function isPerpetual(path: string): boolean {
-  return path === "docs/api/pkhex-wasm.d.ts" ||
+  return path === "tools/apigen/fixtures/pkhex-wasm.d.ts" ||
     path === "docs/spec/v1-api.md" ||
     path.startsWith("src/ts/gen/");
 }

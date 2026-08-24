@@ -98,7 +98,9 @@ export function buildApiReference(bindingRows?: readonly BindingRow[]): string {
   lines.push("## Public surface", "");
   lines.push(
     "> Generated from `tools/apigen/model.ts` — run `deno task gen`; never edit by hand.",
-    "> The same model emits [`docs/api/pkhex-wasm.d.ts`](../api/pkhex-wasm.d.ts),",
+    "> The same model emits [`tools/apigen/fixtures/pkhex-wasm.d.ts`](../../tools/apigen/fixtures/pkhex-wasm.d.ts),",
+    "> which the packaging pipeline ships as the package's `index.d.ts` and the",
+    "> live docs site documents.",
     "> the declaration file the live docs site builds from.",
     "",
   );

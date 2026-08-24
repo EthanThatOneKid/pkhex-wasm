@@ -84,7 +84,9 @@ The chapter below is generated from `tools/apigen/model.ts` by `deno task gen`. 
 ## Public surface
 
 > Generated from `tools/apigen/model.ts` — run `deno task gen`; never edit by hand.
-> The same model emits [`docs/api/pkhex-wasm.d.ts`](../api/pkhex-wasm.d.ts),
+> The same model emits [`tools/apigen/fixtures/pkhex-wasm.d.ts`](../../tools/apigen/fixtures/pkhex-wasm.d.ts),
+> which the packaging pipeline ships as the package's `index.d.ts` and the
+> live docs site documents.
 > the declaration file the live docs site builds from.
 
 ### `StatBlock`
@@ -461,7 +463,7 @@ Known landmines, discovered during research and the empirical probe — every im
 
 ## Documentation pipeline
 
-Live site: <https://ethanthatonekid.github.io/pkhex-wasm/> — regenerated on every push to `main` by the [docs workflow](https://github.com/EthanThatOneKid/pkhex-wasm/issues/12) from [`docs/api/pkhex-wasm.d.ts`](../api/pkhex-wasm.d.ts) (this spec's canonical declaration file). Owner direction: the long-term v1 bindings are a systematically generated Deno 2.x type-safe TypeScript library using [ts-morph](https://ts-morph.com/) structured bindings — exactly what `tools/apigen/` does; when packaging produces generated types from the wasm host, that output supersedes the skeleton and becomes the workflow entry.
+Live site: <https://ethanthatonekid.github.io/pkhex-wasm/> — regenerated on every push to `main` by the docs workflow from [`tools/apigen/fixtures/pkhex-wasm.d.ts`](../../tools/apigen/fixtures/pkhex-wasm.d.ts), the generated canonical declaration file; the packaging pipeline ships the same bytes as the package's `index.d.ts`, so the site always documents the shipped surface. The original hand-authored seed retired into generator fixtures when generated types replaced it.
 
 ## Implementation checklist
 

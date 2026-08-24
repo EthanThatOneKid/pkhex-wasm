@@ -1,9 +1,11 @@
 /**
  * Emitter A — canonical declaration file.
  *
- * Emits `docs/api/pkhex-wasm.d.ts` from the model. This is the file the
- * Pages docs workflow (`deno doc --html`) consumes; it supersedes the
- * original hand-written seed, which retired into this generator's inputs.
+ * Emits `tools/apigen/fixtures/pkhex-wasm.d.ts` from the model. This is the
+ * generated surface the Pages docs workflow (`deno doc --html`) documents and
+ * the packaging pipeline ships as the package's index.d.ts — one source, two
+ * consumers. The original hand-written seed retired here when generated types
+ * replaced it (docs-entrypoint swap).
  */
 
 import { Project } from "npm:ts-morph";
@@ -17,7 +19,7 @@ import {
 } from "./model.ts";
 import { jsdocBlock, memberJsdoc, throwsLines } from "./render.ts";
 
-export const DTS_PATH = "docs/api/pkhex-wasm.d.ts";
+export const DTS_PATH = "tools/apigen/fixtures/pkhex-wasm.d.ts";
 
 function moduleDoc(): string {
   const lines: string[] = [...MODULE.overview, ""];

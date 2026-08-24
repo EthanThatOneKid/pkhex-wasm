@@ -8,12 +8,13 @@
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
 
-const packageDir = resolve("../..", "artifacts", "pkg-dist", "package");
+const here = fileURLToPath(new URL(".", import.meta.url));
+const packageDir = resolve(here, "..", "..", "artifacts", "pkg-dist", "package");
 const fixture =
-  process.argv[2] ??
-  resolve("../..", "artifacts", "test-fixtures", "blank-Gen8b.bin");
+  process.argv[2] ?? resolve(here, "..", "..", "artifacts", "test-fixtures", "blank-Gen8b.bin");
 
 for (const required of [join(packageDir, "index.js"), fixture]) {
   if (!existsSync(required)) {
@@ -23,15 +24,27 @@ for (const required of [join(packageDir, "index.js"), fixture]) {
 }
 
 const PORT = 4191;
-const server = spawn(process.execPath, ["serve.mjs", "--root", packageDir, "--port", String(PORT), "--plain"], {
-  stdio: "ignore",
-});
+const server = spawn(
+  process.execPath,
+  ["serve.mjs", "--root", packageDir, "--port", String(PORT), "--plain"],
+  { cwd: here, stdio: "ignore" },
+);
 
 const browser = await chromium.launch({ headless: true });
 try {
   const page = await browser.newPage();
   // Establish a real origin first: module imports from about:blank fail CORS.
-  await page.goto(`http://127.0.0.1:${PORT}/`);
+  // The static server spawns asynchronously — wait for it to accept.
+  const origin = `http://127.0.0.1:${PORT}/`;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await page.goto(origin, { timeout: 2_000 });
+      break;
+    } catch {
+      if (attempt >= 40) throw new Error(`server never came up at ${origin}`);
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  }
   const result = await page.evaluate(
     async ({ base, bytes }) => {
       const { initPKHex } = await import(`${base}index.js`);

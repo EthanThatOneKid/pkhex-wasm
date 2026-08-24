@@ -1,0 +1,99 @@
+# Release engineering (ticket #26). Tag-triggered; exposes the built package
+# and GPL compliance kit on a GitHub Release.
+#
+# npm publishing is deliberately DEFERRED (owner direction): artifacts are
+# exposed via GitHub Releases only. The OIDC trusted-publishing job is kept
+# below, commented, so flipping it on later is mechanical:
+#
+#   permissions:
+#     contents: read
+#     id-token: write        # npm provenance via OIDC
+#   steps:
+#     - uses: actions/setup-node@v4
+#       with:
+#         node-version: 22
+#         registry-url: https://registry.npmjs.org/
+#     - run: npm install -g npm@11          # npm >= 11 pinned for trusted publishing
+#     - run: npm publish ./artifacts/pkg-dist/pkhex-wasm-*.tgz
+#       env:
+#         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}  # not needed for OIDC; drop when enabling provenance-only
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Install wasmbrowser workload
+        run: dotnet workload install wasmbrowser
+
+      - name: Release build
+        run: dotnet build pkhex-wasm.slnx -c Release
+
+      - name: Full test suite
+        run: dotnet test pkhex-wasm.slnx -c Release --no-build --nologo
+
+      - name: Generator drift gate
+        run: deno task gen:check
+
+      - name: Generator tests
+        run: deno task apigen:test
+
+      - name: Typecheck TS sources
+        run: deno task typecheck
+
+      - name: Run E2E suite
+        working-directory: tests/e2e
+        run: |
+          npm ci
+          npm run prepare:e2e
+          npx playwright install --with-deps chromium
+          npx playwright test
+
+      - name: Assemble package + compliance kit
+        run: |
+          npm ci --prefix tools/package
+          node tools/package/build-package.mjs --version "${GITHUB_REF_NAME#v}"
+
+      - name: Verify packaged artifact boots in Chromium
+        working-directory: tests/e2e
+        run: node verify-package.mjs
+
+      - name: Create GitHub release with artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "pkhex-wasm ${GITHUB_REF_NAME#v}" \
+            --generate-notes \
+            artifacts/pkg-dist/pkhex-wasm-*.tgz \
+            artifacts/pkg-dist/complete-source.tar.gz
+
+      # Deferred: npm publish (see header comment for the exact steps to enable).

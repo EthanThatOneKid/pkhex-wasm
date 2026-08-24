@@ -1,4 +1,5 @@
 import assert from "node:assert";
+import { DTS_PATH } from "./emit-dts.ts";
 import { computeOutputs, isPerpetual, loadAndValidateBinding } from "./gen.ts";
 import { buildApiReference, stitch } from "./emit-spec.ts";
 import { BINDING_MAPPINGS } from "./mappings.ts";
@@ -28,7 +29,7 @@ Deno.test("model integrity — exactly three error classes", () => {
 });
 
 Deno.test("emitted d.ts carries the full locked surface", () => {
-  const dts = outputs.get("docs/api/pkhex-wasm.d.ts")!;
+  const dts = outputs.get(DTS_PATH)!;
   assert.ok(dts.length > 0);
   assert.ok(
     dts.includes("export declare function initPKHex(options?: InitOptions): Promise<PKHex>;"),
@@ -43,7 +44,7 @@ Deno.test("emitted d.ts carries the full locked surface", () => {
 });
 
 Deno.test("emitted d.ts preserves tier throw semantics on mutators", () => {
-  const dts = outputs.get("docs/api/pkhex-wasm.d.ts")!;
+  const dts = outputs.get(DTS_PATH)!;
   assert.ok(
     dts.includes("@throws {UnsupportedOperationError} on Gen 1–2 (natures do not exist)"),
     "setNature Gen1–2 throw missing",
@@ -101,7 +102,7 @@ Deno.test("emission is deterministic across runs", () => {
 });
 
 Deno.test("perpetual vs bootstrap classification", () => {
-  assert.ok(isPerpetual("docs/api/pkhex-wasm.d.ts"));
+  assert.ok(isPerpetual(DTS_PATH));
   assert.ok(isPerpetual("docs/spec/v1-api.md"));
   assert.ok(isPerpetual("src/ts/gen/types.ts"));
   assert.ok(!isPerpetual("src/ts/index.ts"));
@@ -109,7 +110,7 @@ Deno.test("perpetual vs bootstrap classification", () => {
 });
 
 Deno.test("MoveInfo carries only Core-tracked fields — no power/accuracy (owner adjudication on #19)", () => {
-  const moveInfo = outputs.get("docs/api/pkhex-wasm.d.ts")!;
+  const moveInfo = outputs.get(DTS_PATH)!;
   const iface = moveInfo.slice(
     moveInfo.indexOf("export interface MoveInfo"),
     moveInfo.indexOf("}", moveInfo.indexOf("export interface MoveInfo")),

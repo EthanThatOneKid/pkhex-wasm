@@ -87,7 +87,7 @@ run(process.execPath, [
   "--platform=browser",
   `--outfile=${join(STAGE, "index.js")}`,
 ]);
-cpSync(join(ROOT, "docs", "api", "pkhex-wasm.d.ts"), join(STAGE, "index.d.ts"));
+cpSync(join(ROOT, "tools", "apigen", "fixtures", "pkhex-wasm.d.ts"), join(STAGE, "index.d.ts"));
 
 log("staging wasm runtime…");
 let dotnetEntry = null;
