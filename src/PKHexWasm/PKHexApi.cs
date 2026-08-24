@@ -29,6 +29,25 @@ public static partial class PKHexApi
 
     // ---- lifecycle ---------------------------------------------------------
 
+    private static int _cryptoRegistered;
+
+    /// <summary>
+    /// Registers the Managed crypto providers onto RuntimeCryptographyProvider
+    /// (spec bootstrap step 2). Must run before any save can be parsed so the
+    /// BDSP/Gen 7/HOME seams work transparently the first time they are
+    /// reached; idempotent, and never overrides an explicitly-set provider.
+    /// </summary>
+    [JSExport]
+    public static string Initialize()
+    {
+        if (Interlocked.CompareExchange(ref _cryptoRegistered, 1, 0) == 0)
+        {
+            RuntimeCryptographyProvider.Aes = new ManagedAes();
+            RuntimeCryptographyProvider.Md5 = new ManagedMd5();
+        }
+        return GetApiVersion();
+    }
+
     /// <summary>API version stamp (semver contract per the API-surface decision).</summary>
     [JSExport]
     public static string GetApiVersion() => "v0-binding";

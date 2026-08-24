@@ -7,6 +7,7 @@ import { GameHandle } from "./game.ts";
  * (#14 phase 1) lands, this interface becomes generated.
  */
 export interface PkHexApiExports {
+  Initialize(): string;
   GetApiVersion(): string;
   Load(saveBytes: Uint8Array): number;
   SaveBytes(game: number): Uint8Array;
@@ -120,6 +121,10 @@ async function createRoot(options?: InitOptions): Promise<PKHex> {
   if (!api) {
     throw new Error("pkhex-wasm: PKHexWasm.Wasm.PkHexExports not found in the loaded runtime");
   }
+
+  // Bootstrap step 2 (spec): Managed crypto registers before the root is
+  // returned, so no parse path can run against platform-default providers.
+  api.Initialize();
 
   return new PKHexImpl(api);
 }

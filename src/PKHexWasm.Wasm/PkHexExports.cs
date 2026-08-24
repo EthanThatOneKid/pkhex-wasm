@@ -13,6 +13,10 @@ public static partial class PkHexExports
     [JSExport]
     public static string GetApiVersion() => PKHexApi.GetApiVersion();
 
+    /// <summary>Registers Managed crypto onto the Core provider seam; call before any parse.</summary>
+    [JSExport]
+    public static string Initialize() => PKHexApi.Initialize();
+
     /// <summary>Parses one complete logical save buffer; defensive copy at the boundary.</summary>
     [JSExport]
     [JsThrows("SaveParseError", "when the bytes match no supported format")]

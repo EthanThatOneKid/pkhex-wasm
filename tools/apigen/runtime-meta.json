@@ -1,7 +1,7 @@
 {
   "source": "src/PKHexWasm.Wasm (facade)",
-  "generatedAt": "2026-08-23",
-  "methodCount": 35,
+  "generatedAt": "2026-08-24",
+  "methodCount": 36,
   "methods": [
     {
       "name": "Close",
@@ -150,6 +150,14 @@
       "name": "GetApiVersion",
       "returns": "string",
       "params": [],
+      "throws": [],
+      "file": "PkHexExports.cs"
+    },
+    {
+      "name": "Initialize",
+      "returns": "string",
+      "params": [],
+      "doc": "Registers Managed crypto onto the Core provider seam; call before any parse.",
       "throws": [],
       "file": "PkHexExports.cs"
     },

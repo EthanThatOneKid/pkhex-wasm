@@ -381,6 +381,7 @@ when either side changes without the other.
 | `Close` | `(internal)` | optional explicit release; GC-reliant contract unchanged |
 | `GenerateDemoSave` | `(internal)` | dev/demo helper |
 | `GetApiVersion` | `(internal)` | runtime version stamp |
+| `Initialize` | `(internal)` | registers managed crypto at bootstrap, before any parse |
 | `GameBoxMonHandles` | `Game.box` | materializes entity handles per non-empty slot |
 | `GameBoxCount` | `Game.boxCount` |  |
 | `GameGeneration` | `Game.generation` |  |

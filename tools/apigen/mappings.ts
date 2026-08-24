@@ -21,6 +21,7 @@ export interface BindingMapping {
 export const BINDING_MAPPINGS: BindingMapping[] = [
   { export: "Load", target: "PKHex.load", note: "defensive copy-in happens wasm-side" },
   { export: "SaveBytes", target: "PKHex.saveBytes" },
+  { export: "Initialize", target: "(internal)", note: "registers managed crypto at bootstrap, before any parse" },
   { export: "GetApiVersion", target: "(internal)", note: "runtime version stamp" },
   { export: "Close", target: "(internal)", note: "optional explicit release; GC-reliant contract unchanged" },
   { export: "GenerateDemoSave", target: "(internal)", note: "dev/demo helper" },
