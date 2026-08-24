@@ -209,7 +209,7 @@ static HashSet<ushort> CollectLegalItems(EntityContext context)
 
 // ---- plumbing -----------------------------------------------------------
 
-static void Emit<T>(string path, IEnumerable<T> entries)
+static void Emit<T>(string path, IReadOnlyCollection<T> entries)
 {
     var options = new JsonSerializerOptions
     {

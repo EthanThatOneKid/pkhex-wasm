@@ -68,6 +68,9 @@ public sealed class ManagedAes : IAesCryptographyProvider
         }
     }
 
+    // Core's IAes interface requires all four operations per session, but
+    // MemeCrypto/HOME each use exactly one mode - so sessions reject the mode
+    // they were not created for rather than silently falling through.
     private sealed class EcbSession : BlockSession
     {
         public EcbSession(byte[] key) : base(key) { }

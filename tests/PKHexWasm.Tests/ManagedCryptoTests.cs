@@ -118,7 +118,7 @@ public sealed class ManagedCryptoTests
             var iv = mode == CipherMode.CBC ? RandomBytes(16) : null;
             var plaintext = RandomBytes(16 * 7);
 
-            using var managed = ManagedProvider().Create(key, mode, PaddingMode.None, iv);
+            using var managed = new ManagedAes().Create(key, mode, PaddingMode.None, iv);
 
             var cipherText = new byte[plaintext.Length];
             InvokeEncrypt(managed, mode, plaintext, cipherText);
@@ -127,20 +127,16 @@ public sealed class ManagedCryptoTests
             InvokeDecrypt(managed, mode, cipherText, roundTripped);
             Assert.Equal(plaintext, roundTripped);
 
+            using var oracle = Aes.Create();
+            oracle.Mode = mode;
+            oracle.Padding = PaddingMode.None;
+            oracle.Key = key;
             if (iv is null)
             {
-                using var oracle = Aes.Create();
-                oracle.Mode = mode;
-                oracle.Padding = PaddingMode.None;
-                oracle.Key = key;
                 Assert.Equal(oracle.EncryptEcb(plaintext, PaddingMode.None), cipherText);
             }
             else
             {
-                using var oracle = Aes.Create();
-                oracle.Mode = mode;
-                oracle.Padding = PaddingMode.None;
-                oracle.Key = key;
                 oracle.IV = iv;
                 Assert.Equal(oracle.EncryptCbc(plaintext, iv, PaddingMode.None), cipherText);
             }
@@ -168,10 +164,8 @@ public sealed class ManagedCryptoTests
     }
 
     private static IAesCryptographyProvider.IAes CreateManaged(string keyHex, CipherMode mode, string? iv) =>
-        ManagedProvider().Create(Convert.FromHexString(keyHex), mode, PaddingMode.None,
+        new ManagedAes().Create(Convert.FromHexString(keyHex), mode, PaddingMode.None,
             iv is null ? null : Convert.FromHexString(iv));
-
-    private static IAesCryptographyProvider ManagedProvider() => new ManagedAes();
 
     private static void AssertRoundTripVectors(
         Action<ReadOnlySpan<byte>, Span<byte>> transform,
