@@ -20,6 +20,9 @@ function arg(name) {
 const root = resolve(arg("root") ?? ".");
 const staticDir = fileURLToPath(new URL("./static/", import.meta.url));
 const port = Number(arg("port") ?? 4173);
+// --plain: serve the docroot verbatim (package-layout verification); no
+// harness files, no /wasm prefix mapping, no fingerprint aliasing.
+const plain = process.argv.includes("--plain");
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -33,11 +36,19 @@ const MIME = {
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
   const path = decodeURIComponent(url.pathname);
-  if (path === "/") return respond(res, join(staticDir, "index.html"));
+  if (path === "/") {
+    if (plain) {
+      res.writeHead(404);
+      return res.end("plain mode: import /index.js directly");
+    }
+    return respond(res, join(staticDir, "index.html"));
+  }
 
-  const candidates = path.startsWith("/wasm/")
-    ? [resolveFingerprint(join(root, path.slice("/wasm".length)))]
-    : [join(staticDir, path.slice(1)), join(root, path)];
+  const candidates = plain
+    ? [join(root, path)]
+    : path.startsWith("/wasm/")
+      ? [resolveFingerprint(join(root, path.slice("/wasm".length)))]
+      : [join(staticDir, path.slice(1)), join(root, path)];
 
   for (const candidate of candidates) {
     if (!insideRoot(candidate, staticDir) && !insideRoot(candidate, root)) continue;

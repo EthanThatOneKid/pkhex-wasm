@@ -72,6 +72,24 @@ jobs:
         working-directory: tests/e2e
         run: npx playwright test
 
+      - name: Package + size budget gate (8 MB gz first-load)
+        run: |
+          npm ci --prefix tools/package
+          node tools/package/build-package.mjs --version 0.0.0-ci
+
+      - name: Verify packaged artifact boots in Chromium
+        working-directory: tests/e2e
+        run: node verify-package.mjs
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pkg-dist
+          path: |
+            artifacts/pkg-dist/*.tgz
+            artifacts/pkg-dist/complete-source.tar.gz
+          if-no-files-found: error
+
       - name: Upload test artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -79,6 +97,3 @@ jobs:
           name: e2e-results
           path: tests/e2e/test-results
           if-no-files-found: ignore
-
-      # Size-budget check slots in here with the packaging pipeline (#25):
-      # it gates the published site artifact against the 8 MB gz budget.

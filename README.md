@@ -50,6 +50,7 @@ deno task gen:check           # drift gate — fails when outputs lag the model
 deno task apigen:test         # generator tests
 deno task typecheck           # Deno check over the generator + src/ts
 deno task e2e                 # playwright E2E: fixtures → site → harness → headless Chromium
+deno task package             # build the npm tarball + GPL kit, gate the 8 MB gz budget
 ```
 
 The E2E suite (`tests/e2e/`) boots the real `initPKHex()` surface against the
@@ -71,6 +72,7 @@ into a gitignored directory — no binaries are committed. A gitignored
 | `tests/PKHexWasm.Tests` | xUnit logic seam: contracts, tiers, crypto vectors, fixture factory |
 | `tests/e2e` | Playwright E2E suite driving the published site in headless Chromium |
 | `tests/crypto-vectors.json` | Shared RFC 1321 / NIST SP 800-38A vectors consumed by both test layers |
+| `tools/package` | Packaging pipeline: docxodus-shaped npm tarball, brotli siblings, GPL compliance kit, size gate |
 | `examples/deno-cli.ts` | Minimal CLI usage: print a save's party (`deno run -A examples/deno-cli.ts <save>`) |
 | `docs/spec/v1-api.md` | The locked v1 JavaScript API specification |
 | `external/PKHeX.Everywhere` | Vendored upstream (MIT facade/web layers wrapping the GPLv3 `PKHeX.Core` fork, itself a nested submodule) |
