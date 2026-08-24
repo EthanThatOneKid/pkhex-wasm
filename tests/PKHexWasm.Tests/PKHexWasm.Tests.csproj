@@ -16,10 +16,20 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\PKHexWasm\PKHexWasm.csproj" />
+    <ProjectReference Include="..\PKHexWasm.TestSupport\PKHexWasm.TestSupport.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <Using Include="Xunit" />
+  </ItemGroup>
+
+  <!--
+    Shared crypto vectors (spec: constants shared by both assertion layers).
+    Copied next to the test assembly so ManagedCryptoTests reads the same file
+    the JS E2E suite imports.
+  -->
+  <ItemGroup>
+    <Content Include="..\crypto-vectors.json" CopyToOutputDirectory="PreserveNewest" Link="crypto-vectors.json" />
   </ItemGroup>
 
 </Project>

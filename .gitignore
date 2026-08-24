@@ -4,3 +4,9 @@ obj/
 *.user
 node_modules/
 _docs/
+artifacts/
+.local-fixtures/
+tests/e2e/test-results/
+tests/e2e/playwright-report/
+tests/e2e/static/pkhex-wasm.mjs
+TestResults/

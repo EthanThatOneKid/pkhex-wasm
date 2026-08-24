@@ -63,6 +63,8 @@ function toModuleUrlBase(base: string): string {
   const isDrivePath = /^[a-z]:[\\/]/i.test(base);
   const hasScheme = /^[a-z][a-z0-9+.-]+:/i.test(base) && !isDrivePath;
   if (hasScheme) return base;
+  // Origin-relative paths resolve against the document, not the filesystem.
+  if (base.startsWith("/")) return base;
   return `file://${base.replace(/\\/g, "/").replace(/^\/(?=[A-Za-z]:)/, "")}`;
 }
 

@@ -1,4 +1,5 @@
 using PKHeX.Core;
+using PKHexWasm.TestSupport;
 
 namespace PKHexWasm.Tests;
 

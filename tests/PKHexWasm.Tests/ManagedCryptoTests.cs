@@ -1,6 +1,8 @@
 using System.Buffers.Binary;
 using System.Security.Cryptography;
+using System.Text.Json;
 using PKHeX.Core;
+using PKHexWasm.TestSupport;
 
 namespace PKHexWasm.Tests;
 
@@ -9,26 +11,31 @@ namespace PKHexWasm.Tests;
 /// NIST SP 800-38A vectors for AES-128 ECB/CBC-NoPadding, oracle
 /// cross-checks against the platform implementations (available headless),
 /// and the bootstrap contract that Initialize() swaps providers in.
+///
+/// The vectors live in tests/crypto-vectors.json - the single source of truth
+/// shared with the JS E2E suite (spec: constants shared across layers), so
+/// both layers assert identical results.
 /// </summary>
 public sealed class ManagedCryptoTests
 {
-    // RFC 1321 section A.5 test suite.
-    public static TheoryData<string, string> Md5Rfc1321 => new()
+    private static readonly Lazy<CryptoVectors> Vectors = new(() =>
+        JsonSerializer.Deserialize<CryptoVectors>(
+            File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "crypto-vectors.json")),
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+        ?? throw new InvalidOperationException("crypto-vectors.json deserialized to null"));
+
+    public static TheoryData<string, string> Md5Rfc1321
     {
-        { "", "d41d8cd98f00b204e9800998ecf8427e" },
-        { "a", "0cc175b9c0f1b6a831c399e269772661" },
-        { "abc", "900150983cd24fb0d6963f7d28e17f72" },
-        { "message digest", "f96b697d7cb7938d525a2f31aaf161d0" },
-        { "abcdefghijklmnopqrstuvwxyz", "c3fcd3d76192e4007dfb496cca67e13b" },
+        get
         {
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
-            "d174ab98d277d9f5a5611c2c9f419d9f"
-        },
-        {
-            "12345678901234567890123456789012345678901234567890123456789012345678901234567890",
-            "57edf4a22be3c955ac49da2e2107b67a"
-        },
-    };
+            var data = new TheoryData<string, string>();
+            foreach (var v in Vectors.Value.Md5Rfc1321)
+            {
+                data.Add(v.Input!, v.DigestHex!);
+            }
+            return data;
+        }
+    }
 
     [Theory]
     [MemberData(nameof(Md5Rfc1321))]
@@ -54,32 +61,12 @@ public sealed class ManagedCryptoTests
         }
     }
 
-    // NIST SP 800-38A F.1.1 ECB-AES128.Encrypt and F.1.2 ECB-AES128.Decrypt.
-    private const string NistAes128Key = "2b7e151628aed2a6abf7158809cf4f3c";
-    private static readonly string[] EcbPlaintext =
-    [
-        "6bc1bee22e409f96e93d7e117393172a",
-        "ae2d8a571e03ac9c9eb76fac45af8e51",
-        "30c81c46a35ce411e5fbc1191a0a52ef",
-        "f69f2445df4f9b17ad2b417be66c3710",
-    ];
-    private static readonly string[] EcbCiphertext =
-    [
-        "3ad77bb40d7a3660a89ecaf32466ef97",
-        "f5d3d58503b9699de785895a96fdbaaf",
-        "43b1cd7f598ece23881b00e3ed030688",
-        "7b0c785e27e8ad3f8223207104725dd4",
-    ];
-
     // NIST SP 800-38A F.2.1 CBC-AES128.Encrypt; IV from F.2.1.
-    private const string NistCbcIv = "000102030405060708090a0b0c0d0e0f";
-    private static readonly string[] CbcCiphertext =
-    [
-        "7649abac8119b246cee98e9b12e9197d",
-        "5086cb9b507219ee95db113a917678b2",
-        "73bed6b8e3c1743b7116e69e22229516",
-        "3ff1caa1681fac09120eca307586e1a7",
-    ];
+    private static string NistAes128Key => Vectors.Value.Aes128NistSp80038A.KeyHex!;
+    private static string[] EcbPlaintext => Vectors.Value.Aes128NistSp80038A.PlaintextBlocksHex!.ToArray();
+    private static string[] EcbCiphertext => Vectors.Value.Aes128NistSp80038A.EcbCiphertextBlocksHex!.ToArray();
+    private static string NistCbcIv => Vectors.Value.Aes128NistSp80038A.CbcIvHex!;
+    private static string[] CbcCiphertext => Vectors.Value.Aes128NistSp80038A.CbcCiphertextBlocksHex!.ToArray();
 
     [Fact]
     public void ManagedAes_ecb_encrypt_matches_nist_sp800_38a()
@@ -212,4 +199,17 @@ public sealed class ManagedCryptoTests
         Random.Shared.NextBytes(bytes);
         return bytes;
     }
+
+    private sealed record CryptoVectors(
+        IReadOnlyList<Md5Vector> Md5Rfc1321,
+        AesVectors Aes128NistSp80038A);
+
+    private sealed record Md5Vector(string? Input, string? DigestHex);
+
+    private sealed record AesVectors(
+        string? KeyHex,
+        string? CbcIvHex,
+        IReadOnlyList<string> PlaintextBlocksHex,
+        IReadOnlyList<string> EcbCiphertextBlocksHex,
+        IReadOnlyList<string> CbcCiphertextBlocksHex);
 }

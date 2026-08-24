@@ -1,0 +1,18 @@
+{
+  "name": "pkhex-wasm-e2e",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build:harness": "esbuild ../../src/ts/index.ts --bundle --format=esm --platform=browser --outfile=static/pkhex-wasm.mjs",
+    "gen:fixtures": "dotnet run --project ../../tools/fixturegen -c Release -- ../../artifacts/test-fixtures",
+    "publish:site": "dotnet publish ../../src/PKHexWasm.Wasm -c Release -o ../../artifacts/e2e-site",
+    "prepare:e2e": "npm run gen:fixtures && npm run publish:site && npm run build:harness",
+    "serve": "node serve.mjs",
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.1",
+    "esbuild": "^0.25.10"
+  }
+}

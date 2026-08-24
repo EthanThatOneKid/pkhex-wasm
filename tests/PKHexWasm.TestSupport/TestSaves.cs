@@ -1,12 +1,16 @@
 using System.Buffers.Binary;
 using PKHeX.Core;
 
-namespace PKHexWasm.Tests;
+namespace PKHexWasm.TestSupport;
 
 /// <summary>
-/// Blank-fixture factory for contract tests (spec testing strategy: no real
-/// save binaries are committed). Encodes the per-format recipes discovered by
-/// the #22 constructibility probe:
+/// Shared blank-fixture factory (spec testing strategy: no real save binaries
+/// are committed; blanks are generated per <see cref="EntityContext"/>).
+///
+/// Consumers: the xUnit logic suite, and tools/fixturegen which materializes
+/// the same fixtures for the playwright E2E suite into a gitignored directory.
+///
+/// Encodes the per-format recipes discovered by the #22 constructibility probe:
 ///
 /// - Gen 1-2 recognition requires both box and party lists seeded.
 /// - Gen 6/7 and LGPE blanks lack the console-stamped footer magic; the
@@ -16,12 +20,17 @@ namespace PKHexWasm.Tests;
 /// - Swish formats (SwSh/PLA/SV/Z-A) write valid bytes but their blank block
 ///   layout matches no retail size, so SaveUtil cannot re-recognize them;
 ///   Gen 3/4 blanks cannot Write() at all. Neither is loadable via the API
-///   with blank factories - covered by classification tests instead, and
-///   owned by the general fixture-factory ticket (#24).
+///   with blank factories - covered by classification tests instead.
 /// </summary>
-internal static class TestSaves
+public static class TestSaves
 {
     public const string Trainer = "TEST";
+
+    /// <summary>The one species every fixture seeds (national dex id).</summary>
+    public const ushort Species = 25; // Pikachu
+
+    /// <summary>The level every fixture seeds.</summary>
+    public const byte Level = 5;
 
     /// <summary>Contexts whose blanks load through <see cref="PKHexApi.Load"/>.</summary>
     public static readonly EntityContext[] LoadableContexts =
@@ -43,8 +52,12 @@ internal static class TestSaves
         EntityContext.Gen7b,
     ];
 
-    /// <summary>A blank save of <paramref name="context"/> with one Pikachu (level 5) in box 0.</summary>
-    public static byte[] WithBoxMon(EntityContext context, ushort species = 25, byte level = 5)
+    /// <summary>Loadable edit-tier contexts (mutators apply and persist).</summary>
+    public static IEnumerable<EntityContext> EditTierContexts =>
+        LoadableContexts.Except(ReadOnlyLoadableContexts);
+
+    /// <summary>A blank save of <paramref name="context"/> with one Pikachu (<see cref="Level"/>) in box 0.</summary>
+    public static byte[] WithBoxMon(EntityContext context, ushort species = Species, byte level = Level)
     {
         var sav = BlankSaveFile.Get(context, Trainer);
         var pk = sav.BlankPKM;

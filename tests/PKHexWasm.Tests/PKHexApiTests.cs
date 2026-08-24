@@ -1,4 +1,5 @@
 using PKHeX.Core;
+using PKHexWasm.TestSupport;
 using PKHexWasm;
 
 namespace PKHexWasm.Tests;
@@ -6,7 +7,7 @@ namespace PKHexWasm.Tests;
 /// <summary>
 /// Contract tests for the Binding layer seam (spec data contracts):
 /// defensive copy-in, fresh array out, snapshot handles with write-through,
-/// generation/trainer/box reads. Runs headless — no wasm runtime involved.
+/// generation/trainer/box reads. Runs headless â€” no wasm runtime involved.
 /// Exercises exactly the static surface JavaScript calls.
 /// </summary>
 public sealed class PKHexApiTests
@@ -179,7 +180,7 @@ public sealed class PKHexApiTests
         var mon = BoxMon(game);
         PKHexApi.MonSetMoves(mon, moves);
 
-        var slots = PKHexApi.MonMoveSlots(mon); // flattened [id, pp] × 4
+        var slots = PKHexApi.MonMoveSlots(mon); // flattened [id, pp] Ã— 4
         Assert.Equal(moves[0], slots[0]);
         Assert.Equal(moves[1], slots[2]);
         Assert.Equal(moves[2], slots[4]);

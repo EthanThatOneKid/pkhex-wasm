@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  logic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Install wasmbrowser workload
+        run: dotnet workload install wasmbrowser
+
+      - name: Release build
+        run: dotnet build pkhex-wasm.slnx -c Release
+
+      - name: Full test suite (logic seam)
+        run: dotnet test pkhex-wasm.slnx -c Release --no-build --nologo
+
+      - name: Generator drift gate
+        run: deno task gen:check
+
+      - name: Generator tests
+        run: deno task apigen:test
+
+      - name: Typecheck TS sources
+        run: deno task typecheck
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: logic
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install wasmbrowser workload
+        run: dotnet workload install wasmbrowser
+
+      - name: Generate fixtures, publish site, bundle harness
+        working-directory: tests/e2e
+        run: |
+          npm ci
+          npm run prepare:e2e
+
+      - name: Install headless Chromium
+        working-directory: tests/e2e
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E suite
+        working-directory: tests/e2e
+        run: npx playwright test
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: tests/e2e/test-results
+          if-no-files-found: ignore
+
+      # Size-budget check slots in here with the packaging pipeline (#25):
+      # it gates the published site artifact against the 8 MB gz budget.

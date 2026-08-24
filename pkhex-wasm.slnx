@@ -1,4 +1,13 @@
 <Solution>
+  <Folder Name="/external/">
+    <!--
+      The vendored submodule must be a mapped solution member: out-of-solution
+      ProjectReferences resolve through the .slnx metaproj without a
+      Configuration global property, silently compiling upstream as Debug
+      (live Debug.Asserts) while everything else builds Release.
+    -->
+    <Project Path="external/PKHeX.Everywhere/external/PKHeX/PKHeX.Core/PKHeX.Core.csproj" />
+  </Folder>
   <Folder Name="/spike/">
     <Project Path="spike/SpikeApp/SpikeApp.csproj" />
     <Project Path="spike/SpikeLib.Tests/SpikeLib.Tests.csproj" />
