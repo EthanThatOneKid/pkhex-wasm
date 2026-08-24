@@ -49,8 +49,9 @@ export function buildCompleteSource(root, outFile) {
   rmSync(staging, { recursive: true, force: true });
 }
 
-function run(cmd, args, cwd) {
-  const res = spawnSync(cmd, args, { cwd, stdio: "inherit" });
+export function run(cmd, args, cwd) {
+  // npm is npm.cmd on Windows; Node refuses to spawn .cmd without a shell.
+  const res = spawnSync(cmd, args, { cwd, stdio: "inherit", shell: cmd === "npm" });
   if (res.status !== 0) throw new Error(`${cmd} ${args.join(" ")} exited ${res.status}`);
 }
 

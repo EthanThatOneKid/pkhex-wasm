@@ -31,9 +31,8 @@ foreach (var context in TestSaves.LoadableContexts)
         Console.Error.WriteLine($"fixture {context}: reload does not surface the seeded mon");
         return 1;
     }
-    var tier = context is EntityContext.Gen1 or EntityContext.Gen2 or EntityContext.Gen7b
-        ? "read-only"
-        : "edit";
+    var readOnly = TestSaves.ReadOnlyLoadableContexts.ToHashSet();
+    var tier = readOnly.Contains(context) ? "read-only" : "edit";
 
     File.WriteAllBytes(path, bytes);
     fixtures.Add(new

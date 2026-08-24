@@ -4,7 +4,7 @@ using PKHexWasm.TestSupport;
 namespace PKHexWasm.Tests;
 
 /// <summary>
-/// Mint-aware nature writes (ticket #22): the naÃ¯ve Core setter silently
+/// Mint-aware nature writes (ticket #22): the naïve Core setter silently
 /// no-ops on Gen 8+ formats, so setNature writes both Nature and
 /// StatAlignment (Facade Natures.ChangeAll semantics) and persists through
 /// an export/reload cycle on every loadable edit-tier format.

@@ -61,28 +61,41 @@ test.describe("read-only tier", () => {
     });
   });
 
-  test("LGPE (Gen7b) rejects mutators as read-only tier", async ({ api }) => {
+  test("LGPE (Gen7b) rejects every mutator as read-only tier", async ({ api }) => {
     const bytes = Array.from(loadFixtureBytes("blank-Gen7b.bin"));
     const result = await callApi(api, `(PKHex, bytes) => {
       const game = PKHex.load(new Uint8Array(bytes));
-      const err = (() => {
-        try {
-          game.box(0)[0].setNickname("Sparky");
-          return null;
-        } catch (e) {
-          return { name: e.name, message: e.message };
-        }
-      })();
-      return { generation: game.generation, err };
+      const mon = game.box(0)[0];
+      const attempts = [
+        ["setNickname", () => mon.setNickname("Sparky")],
+        ["setLevel", () => mon.setLevel(42)],
+        ["setMoves", () => mon.setMoves([1, 2, 3, 44])],
+        // LGPE has natures, so the concept-aware setNature check passes and
+        // the tier guard rejects — unlike Gen 1-2's UnsupportedOperationError.
+        ["setNature", () => mon.setNature(3)],
+        ["setShiny", () => mon.setShiny(true)],
+        ["setIVs", () => mon.setIVs({ attack: 31 })],
+        ["setEVs", () => mon.setEVs({ attack: 252 })],
+      ];
+      return {
+        generation: game.generation,
+        attempts: attempts.map(([op, run]) => {
+          try {
+            run();
+            return { op, threw: false };
+          } catch (err) {
+            return { op, threw: true, name: err.name };
+          }
+        }),
+      };
     }`, bytes);
 
-    expect(result).toMatchObject({
-      ok: true,
-      value: {
-        generation: "Gen7b",
-        err: { name: "UnsupportedTierError" },
-      },
-    });
+    expect(result).toMatchObject({ ok: true, value: { generation: "Gen7b" } });
+    if (!result.ok) return;
+    for (const attempt of result.value.attempts) {
+      expect(attempt.threw, `${attempt.op} must throw`).toBe(true);
+      expect(attempt.name, attempt.op).toBe("UnsupportedTierError");
+    }
   });
 });
 

@@ -37,12 +37,11 @@ test.describe("shared crypto vectors vs node:crypto", () => {
   test("aes-128-ecb no-padding matches NIST SP 800-38A F.1", () => {
     const key = Buffer.from(aes.keyHex, "hex");
     const plaintext = Buffer.concat(aes.plaintextBlocksHex.map((h) => Buffer.from(h, "hex")));
-    const expected = aes.ecbCiphertextBlocksHex.map((h) => h);
+    const expected = aes.ecbCiphertextBlocksHex;
 
     const cipher = createCipheriv("aes-128-ecb", key, null);
     cipher.setAutoPadding(false);
     expect(cipher.update(plaintext).toString("hex").match(/.{32}/g)).toEqual(expected);
-
     const decipher = createDecipheriv("aes-128-ecb", key, null);
     decipher.setAutoPadding(false);
     const roundTripped = Buffer.concat([
@@ -56,7 +55,7 @@ test.describe("shared crypto vectors vs node:crypto", () => {
     const key = Buffer.from(aes.keyHex, "hex");
     const iv = Buffer.from(aes.cbcIvHex, "hex");
     const plaintext = Buffer.concat(aes.plaintextBlocksHex.map((h) => Buffer.from(h, "hex")));
-    const expected = aes.cbcCiphertextBlocksHex.map((h) => h);
+    const expected = aes.cbcCiphertextBlocksHex;
 
     const cipher = createCipheriv("aes-128-cbc", key, iv);
     cipher.setAutoPadding(false);

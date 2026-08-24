@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { test as base, expect } from "@playwright/test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -27,9 +27,20 @@ export const test = base.extend<{ api: Page }>({
 
 const baseURL = fileURLToPath(new URL(".", import.meta.url));
 
-/** Fixture directory override for local runs; defaults to the generator output. */
-export const fixtureDir =
-  process.env.PKHEX_E2E_FIXTURES ?? join(baseURL, "..", "..", "artifacts", "test-fixtures");
+/**
+ * Fixture directory resolution: explicit override env var, then a populated
+ * gitignored `.local-fixtures/` directory (development against personal
+ * dumps — spec: "gitignored local dir honored"), then the blank-fixture
+ * generator output. A directory counts when its manifest exists.
+ */
+export const fixtureDir = resolveFixtureDir();
+
+function resolveFixtureDir(): string {
+  if (process.env.PKHEX_E2E_FIXTURES) return process.env.PKHEX_E2E_FIXTURES;
+  const local = join(baseURL, "..", ".local-fixtures");
+  if (existsSync(join(local, "manifest.json"))) return local;
+  return join(baseURL, "..", "..", "artifacts", "test-fixtures");
+}
 
 export interface FixtureInfo {
   file: string;

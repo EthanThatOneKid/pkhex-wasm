@@ -46,4 +46,35 @@ public sealed class FixtureFactoryTests
             TestSaves.LoadableContexts.ToHashSet(),
             edit.Union(readOnly).ToHashSet());
     }
+
+    /// <summary>
+    /// Classification coverage for the contexts blank fixtures cannot serve
+    /// (#22 probe, pinned so upstream changes surface as intentional edits):
+    /// Gen 3/4 blanks cannot Write() at all; Swish-family blanks (SwSh, PLA,
+    /// SV, Z-A) write bytes whose block layout matches no retail size, so
+    /// SaveUtil cannot re-recognize them. Neither is loadable via the API.
+    /// </summary>
+    [Theory]
+    [InlineData(EntityContext.Gen3)]
+    [InlineData(EntityContext.Gen4)]
+    [InlineData(EntityContext.Gen8)]
+    [InlineData(EntityContext.Gen8a)]
+    [InlineData(EntityContext.Gen9)]
+    [InlineData(EntityContext.Gen9a)]
+    public void Unloadable_contexts_stay_unloadable_through_the_api(EntityContext context)
+    {
+        byte[]? bytes = null;
+        try
+        {
+            bytes = TestSaves.WithBoxMon(context);
+        }
+        catch (Exception)
+        {
+            // Write()-time failure (Gen 3/4): classification holds.
+            return;
+        }
+
+        // Written but not re-recognizable (Swish family).
+        Assert.Throws<InvalidDataException>(() => PKHexApi.Load(bytes));
+    }
 }

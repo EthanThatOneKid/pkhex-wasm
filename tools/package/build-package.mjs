@@ -16,8 +16,7 @@
 // Fails hard when the first-load gz total exceeds the 8 MB budget.
 
 import { spawnSync } from "node:child_process";
-import { brotliCompressSync, gzipSync } from "node:zlib";
-import {
+import { brotliCompressSync, gzipSync } from "node:zlib";import {
   cpSync,
   existsSync,
   mkdirSync,
@@ -30,7 +29,7 @@ import {
 import { join } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { buildCompleteSource, writeUpstreamJson } from "./lib/kit.mjs";
+import { buildCompleteSource, run, writeUpstreamJson } from "./lib/kit.mjs";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const SITE = join(ROOT, "artifacts", "pkg-site");
@@ -45,12 +44,6 @@ const version = (() => {
 })();
 
 const log = (msg) => console.log(`[package] ${msg}`);
-
-function run(cmd, args, cwd = ROOT) {
-  // npm is npm.cmd on Windows; Node refuses to spawn .cmd without a shell.
-  const res = spawnSync(cmd, args, { cwd, stdio: "inherit", shell: cmd === "npm" });
-  if (res.status !== 0) throw new Error(`${cmd} ${args.join(" ")} exited ${res.status}`);
-}
 
 function gitOut(args) {
   const res = spawnSync("git", args, { cwd: ROOT, encoding: "utf-8" });
