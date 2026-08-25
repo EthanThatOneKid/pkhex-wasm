@@ -51,8 +51,8 @@ jobs:
         with:
           deno-version: v2.x
 
-      - name: Install wasmbrowser workload
-        run: dotnet workload install wasmbrowser
+      # The WebAssembly SDK ships in-box with .NET 10; no optional workload
+      # is installed (wasmbrowser stopped being a workload id in 10.0.400).
 
       - name: Release build
         run: dotnet build pkhex-wasm.slnx -c Release

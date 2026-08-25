@@ -21,9 +21,6 @@ jobs:
         with:
           deno-version: v2.x
 
-      - name: Install wasmbrowser workload
-        run: dotnet workload install wasmbrowser
-
       - name: Release build
         run: dotnet build pkhex-wasm.slnx -c Release
 
@@ -54,9 +51,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-
-      - name: Install wasmbrowser workload
-        run: dotnet workload install wasmbrowser
 
       - name: Generate fixtures, publish site, bundle harness
         working-directory: tests/e2e
