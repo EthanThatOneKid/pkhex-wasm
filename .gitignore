@@ -12,3 +12,4 @@ tests/e2e/static/pkhex-wasm.mjs
 TestResults/
 /test-results/
 session-ses_*.md
+/dist/

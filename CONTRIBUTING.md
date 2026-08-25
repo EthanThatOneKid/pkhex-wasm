@@ -24,7 +24,9 @@ the GPLv3 `PKHeX` fork as its nested submodule; both pins are recorded in
 3. **Re-sync vendored crypto** if the crypto seam changed: follow the re-sync
    ritual in `src/PKHexWasm/Crypto/Vendored/PROVENANCE.md` and update its pin.
 4. **Changelog note**: one entry per user-visible change in `CHANGELOG.md`.
-5. **Semver call** for the next tag, strictly per the API-surface contract:
+5. **Bump the root `package.json` version** to the semver you just chose —
+   git-based installs resolve their tarball via this field.
+6. **Semver call** for the next tag, strictly per the API-surface contract:
    - **major** — the JS surface breaks (renames/removals/signature or error-type changes)
    - **minor** — behavior adds (new generation support, new reads/writes)
    - **patch** — fixes only, surface unchanged

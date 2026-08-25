@@ -1,0 +1,38 @@
+{
+  "name": "pkhex-wasm",
+  "version": "0.1.0",
+  "description": "PKHeX.Core Pokémon save editing compiled to WebAssembly - load, read, edit, and export save files in the browser.",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "prepare": "node scripts/prepare-dist.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EthanThatOneKid/pkhex-wasm.git"
+  },
+  "homepage": "https://ethanthatonekid.github.io/pkhex-wasm/",
+  "bugs": "https://github.com/EthanThatOneKid/pkhex-wasm/issues",
+  "keywords": [
+    "pokemon",
+    "pkhex",
+    "wasm",
+    "save-editing",
+    "browser"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}
