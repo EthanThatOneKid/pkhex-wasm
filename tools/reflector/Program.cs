@@ -9,7 +9,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 //
 //   dotnet run --project tools/reflector -c Release
 
-var root = FindRepoRoot();
+var root = PKHexWasm.Reflector.CoreScan.FindRepoRoot();
 var hostDir = Path.Combine(root, "src", "PKHexWasm.Wasm");
 
 var methods = new List<ExportMethod>();
@@ -64,20 +64,18 @@ Console.WriteLine($"reflect: {methods.Count} export(s) → {Path.GetRelativePath
 
 // ---- v2: scan the vendored Core hierarchy (ADR 0001 raw facts) -------------
 
-var coreDir = Path.Combine(
-    root, "external", "PKHeX.Everywhere", "external", "PKHeX", "PKHeX.Core");
-var coreDll = Path.Combine(coreDir, "bin", "Release", "net10.0", "PKHeX.Core.dll");
+var coreProject = PKHexWasm.Reflector.CoreScan.CoreProjectDirectory(root);
+var coreDll = Path.Combine(coreProject, "bin", "Release", "net10.0", "PKHeX.Core.dll");
 if (!File.Exists(coreDll))
 {
     Console.WriteLine("reflect: PKHeX.Core.dll not built — skipping v2 metadata (build the solution first)");
     return 0;
 }
 
-var coreXml = Path.ChangeExtension(coreDll, ".xml");
-EnsureDocsXml(coreDir, coreDll, coreXml);
+var coreXml = PKHexWasm.Reflector.CoreScan.DocsXmlPath(root);
+EnsureDocsXml(coreProject, coreDll, coreXml);
 
-var commit = Run("git", ["-C",
-    Path.Combine("external", "PKHeX.Everywhere", "external", "PKHeX"), "rev-parse", "HEAD"], root);
+var commit = Run("git", ["-C", coreProject, "rev-parse", "HEAD"], root);
 
 var coreMeta = PKHexWasm.Reflector.CoreScan.Scan([coreDll], File.Exists(coreXml) ? coreXml : null, commit);
 var v2Path = Path.Combine(root, "tools", "apigen", "runtime-meta-v2.json");
@@ -87,20 +85,22 @@ Console.WriteLine(
 return 0;
 
 /// <summary>
-/// Doc comments come from a generated XML file; the vendored project does not
-/// emit one by default, so build it (into its own gitignored bin/) on demand.
+/// Doc comments come from a generated XML file. It lives at a stable path
+/// (CoreScan.DocsXmlPath) so IncrementalClean can never sweep it; rebuild it
+/// when missing or older than the assembly.
 /// </summary>
-static void EnsureDocsXml(string coreDir, string coreDll, string coreXml)
+static void EnsureDocsXml(string coreProject, string coreDll, string coreXml)
 {
     if (File.Exists(coreXml) && File.GetLastWriteTimeUtc(coreXml) >= File.GetLastWriteTimeUtc(coreDll))
     {
         return;
     }
-    Console.WriteLine("reflect: generating PKHeX.Core.xml documentation file…");
+    Console.WriteLine("reflect: generating PKHeX.Core documentation XML…");
     Run("dotnet", ["build",
-        Path.Combine(coreDir, "PKHeX.Core.csproj"),
+        Path.Combine(coreProject, "PKHeX.Core.csproj"),
         "-c", "Release",
         "-p:GenerateDocumentationFile=true",
+        $"-p:DocumentationFile={coreXml}",
         "--nologo", "-v", "q"], Directory.GetCurrentDirectory());
     if (!File.Exists(coreXml))
     {
@@ -130,16 +130,6 @@ static string Run(string program, string[] args, string cwd)
 
     static string Quote(string arg) =>
         arg.Contains(' ') ? $"\"{arg}\"" : arg;
-}
-
-static string FindRepoRoot()
-{
-    var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
-    while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "pkhex-wasm.slnx")))
-    {
-        dir = dir.Parent;
-    }
-    return dir?.FullName ?? throw new InvalidOperationException("repo root not found");
 }
 
 /// <summary>Pulls the &lt;summary&gt; text from the XML doc comment, if any.</summary>

@@ -14,21 +14,20 @@ public static class CoreScanTestHarness
     public static readonly Lazy<(CoreMeta Meta, string DllPath)> Scanned = new(() =>
     {
         var dll = Locate("PKHeX.Core.dll");
-        var xml = Path.ChangeExtension(dll, ".xml");
-        var meta = CoreScan.Scan([dll], File.Exists(xml) ? xml : null, sourceCommit: "test-commit");
+        // Prefer the stable committed docs file; fall back to whatever sits
+        // beside the assembly.
+        var docs = CoreScan.DocsXmlPath(CoreScan.FindRepoRoot());
+        var xml = File.Exists(docs) ? docs
+            : File.Exists(Path.ChangeExtension(dll, ".xml")) ? Path.ChangeExtension(dll, ".xml")
+            : null;
+        var meta = CoreScan.Scan([dll], xml, sourceCommit: "test-commit");
         return (meta, dll);
     });
 
     public static string Locate(string fileName)
     {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "pkhex-wasm.slnx")))
-        {
-            dir = dir.Parent!;
-        }
-        Assert.NotNull(dir);
-        var coreBin = Path.Combine(
-            dir.FullName, "external", "PKHeX.Everywhere", "external", "PKHeX", "PKHeX.Core", "bin");
+        var root = CoreScan.FindRepoRoot();
+        var coreBin = Path.Combine(CoreScan.CoreProjectDirectory(root), "bin");
         foreach (var config in new[] { "Release", "Debug" })
         {
             var candidate = Path.Combine(coreBin, config, "net10.0", fileName);
@@ -41,7 +40,7 @@ public static class CoreScanTestHarness
     }
 }
 
-public class CoreScanTests
+public sealed class CoreScanTests
 {
     private static CoreMeta Meta => CoreScanTestHarness.Scanned.Value.Meta;
 
@@ -99,6 +98,13 @@ public class CoreScanTests
         Assert.Equal("getSet", heldItem.Access);
         Assert.False(heldItem.Computed);
 
+        // ADR 0001 names CurrentLevel as computed: the getter derives from EXP
+        // and the setter re-derives it — mutation must route through mutators.
+        Assert.True(byName["CurrentLevel"].Computed);
+        // Nature is format-conditional (PID-derived pre-Gen6, stored after) and
+        // deliberately NOT a scan-time computed fact.
+        Assert.False(byName["Nature"].Computed);
+
         Assert.Equal("DateOnly?", byName["MetDate"].CsType);
 
         // u64 fields live where Core declares them: Tracker on the Gen8 base,
@@ -149,6 +155,33 @@ public class CoreScanTests
     }
 
     [Fact]
+    public void Concrete_save_classes_are_projected()
+    {
+        Assert.True(Meta.Classes.ContainsKey($"{CoreNs}.SAV3"), "missing concrete save class SAV3");
+        // Gen 9 splits per game rather than one SAV9 class
+        Assert.True(Meta.Classes.ContainsKey($"{CoreNs}.SAV9SV"), "missing concrete save class SAV9SV");
+        Assert.True(Meta.Classes.ContainsKey($"{CoreNs}.SAV9ZA"), "missing concrete save class SAV9ZA");
+    }
+
+    [Fact]
+    public void Doc_pipeline_flows_from_the_generated_xml()
+    {
+        var docsPath = CoreScan.DocsXmlPath(CoreScan.FindRepoRoot());
+        if (!File.Exists(docsPath))
+        {
+            // The docs artifact is produced by `deno task reflect`; a fresh
+            // checkout that never ran it legitimately has none. The pipeline
+            // itself is exercised whenever reflect runs (determinism test
+            // covers the same scan path).
+            return;
+        }
+        // Upstream documents its surface sparsely; this asserts the XML→JSON
+        // pipeline works at all, not full coverage.
+        var documented = Meta.Classes[$"{CoreNs}.PKM"].Members.Count(m => m.Docs is not null);
+        Assert.True(documented >= 15, $"expected ≥15 documented PKM members, found {documented}");
+    }
+
+    [Fact]
     public void Members_are_deterministically_ordered_and_self_consistent()
     {
         foreach (var (fqn, info) in Meta.Classes)
@@ -166,11 +199,15 @@ public class CoreScanTests
     [Fact]
     public void Serialization_is_byte_stable_across_scans()
     {
-        var (meta, dll) = CoreScanTestHarness.Scanned.Value;
-        var xml = Path.ChangeExtension(dll, ".xml");
-        var second = CoreScan.Scan([dll], File.Exists(xml) ? xml : null, sourceCommit: "test-commit");
+        var dll = CoreScanTestHarness.Locate("PKHeX.Core.dll");
+        var docsPath = CoreScan.DocsXmlPath(CoreScan.FindRepoRoot());
+        var xml = File.Exists(docsPath) ? docsPath : null;
 
         var options = new JsonSerializerOptions { WriteIndented = true };
-        Assert.Equal(JsonSerializer.Serialize(meta, options), JsonSerializer.Serialize(second, options));
+        var first = JsonSerializer.Serialize(
+            CoreScan.Scan([dll], xml, sourceCommit: "test-commit"), options);
+        var second = JsonSerializer.Serialize(
+            CoreScan.Scan([dll], xml, sourceCommit: "test-commit"), options);
+        Assert.Equal(first, second);
     }
 }

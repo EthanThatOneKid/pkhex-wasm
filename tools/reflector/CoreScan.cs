@@ -71,15 +71,24 @@ public static class CoreScan
         // identity / derivation
         "Generation", "Format", "IsShiny", "TSV", "PSV", "ShinyXor", "Characteristic",
         "Japanese", "Korean", "SpriteItem", "PIDAbility",
+        // derived-but-settable: the getter recomputes and the setter re-derives
+        // its storage (CurrentLevel writes EXP) — ADR 0001 names it computed so
+        // emission routes mutation through designated mutators only.
+        "CurrentLevel",
+        // format-computed views
+        "TeraType",
         // aggregations
         "MoveCount", "IVTotal", "EVTotal", "MaximumIV", "FlawlessIVCount",
-        "PotentialRating", "PartyStatsPresent", "RibbonCount",
+        "PotentialRating", "PartyStatsPresent", "RibbonCount", "MarkingCount",
         // file naming helpers
         "FileName", "FileNameWithoutExtension", "IsOriginValid",
         // met-data derivations
         "WasEgg", "WasTradedEgg", "IsTradedEgg", "IsUntraded", "HasOriginalMetLocation",
         // save-level aggregations
         "SlotCount", "PlayTimeString", "SeenCount", "CaughtCount", "PercentSeen", "PercentCaught",
+        // NOTE: Nature is deliberately NOT here — pre-Gen6 it is PID-derived but
+        // Gen6+ stores it, so the flag cannot be a per-member scan fact. The
+        // concept-aware mutator semantics (map #15's setNature decision) own it.
     ];
 
     private static readonly HashSet<string> ExcludedMethodNames =
@@ -129,27 +138,20 @@ public static class CoreScan
             AddClass(classes, derived, docs, enums);
         }
 
-        // remaining roots (no transitive closure except where noted below)
+        // remaining roots, plus the subtrees that carry per-format surface:
+        // pouch + dex impls and the concrete save classes (SAV1…SAV9), whose
+        // distinct members (coins/BP blocks etc.) the save-subsystem work needs.
         foreach (var type in roots.Values)
         {
             if (type != pkmsRoot)
             {
                 AddClass(classes, type, docs, enums);
             }
-        }
-
-        // pouch + dex subtrees ride along with their roots
-        foreach (var derived in CollectSubclasses(roots["PKHeX.Core.InventoryPouch"]))
-        {
-            AddClass(classes, derived, docs, enums);
-        }
-        foreach (var derived in CollectSubclasses(roots["PKHeX.Core.ZukanBase`1"]))
-        {
-            AddClass(classes, derived, docs, enums);
-        }
-        foreach (var derived in CollectSubclasses(roots["PKHeX.Core.Zukan`1"]))
-        {
-            AddClass(classes, derived, docs, enums);
+            var closureRoot = type;
+            foreach (var derived in CollectSubclasses(closureRoot))
+            {
+                AddClass(classes, derived, docs, enums);
+            }
         }
 
         return new CoreMeta(
@@ -213,20 +215,27 @@ public static class CoreScan
         return byFqn;
     }
 
+    /// <summary>Ancestors of <paramref name="type"/> up to (excluding) Object, furthest first.</summary>
+    private static List<Type> AncestorChain(Type type)
+    {
+        var chain = new List<Type>();
+        var b = type.BaseType;
+        while (b is not null && b.FullName != "System.Object")
+        {
+            chain.Insert(0, b);
+            b = b.BaseType;
+        }
+        return chain;
+    }
+
     private static IEnumerable<Type> CollectSubclasses(Type root)
     {
         var assembly = root.Assembly;
         foreach (var t in assembly.GetTypes())
         {
-            var b = t.BaseType;
-            while (b is not null && b.FullName != "System.Object")
+            if (AncestorChain(t).Contains(root))
             {
-                if (b == root)
-                {
-                    yield return t;
-                    break;
-                }
-                b = b.BaseType;
+                yield return t;
             }
         }
     }
@@ -315,17 +324,8 @@ public static class CoreScan
             Members: [.. members]);
     }
 
-    private static string[] BaseChainOf(Type type)
-    {
-        var chain = new List<string>();
-        var b = type.BaseType;
-        while (b is not null && b.FullName != "System.Object")
-        {
-            chain.Insert(0, Fqn(b));
-            b = b.BaseType;
-        }
-        return [.. chain];
-    }
+    private static string[] BaseChainOf(Type type) =>
+        [.. AncestorChain(type).Select(Fqn)];
 
     private static void CaptureEnum(Dictionary<string, EnumInfo> enums, Type? type)
     {
@@ -380,7 +380,36 @@ public static class CoreScan
         return t.FullName?.Replace("+", ".") ?? t.Name;
     }
 
-    private static string Format(Type t) => new TypeNameFormatter().Format(t);
+    private static readonly TypeNameFormatter Formatter = new();
+
+    private static string Format(Type t) => Formatter.Format(t);
+
+    /// <summary>
+    /// Walks up from the current directory to the repo root (marker: the
+    /// solution file). Shared by the CLI entry point and the seam tests so the
+    /// vendored-path layout lives in exactly one place.
+    /// </summary>
+    public static string FindRepoRoot()
+    {
+        var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "pkhex-wasm.slnx")))
+        {
+            dir = dir.Parent;
+        }
+        return dir?.FullName ?? throw new InvalidOperationException("repo root not found");
+    }
+
+    /// <summary>The vendored PKHeX.Core project directory (bin composes from here).</summary>
+    public static string CoreProjectDirectory(string root) => Path.Combine(
+        root, "external", "PKHeX.Everywhere", "external", "PKHeX", "PKHeX.Core");
+
+    /// <summary>
+    /// Stable home for the generated XML documentation — outside the vendored
+    /// bin/ so IncrementalClean cannot sweep it between builds. Committed
+    /// alongside runtime-meta-v2.json, pinned to the same submodule commit.
+    /// </summary>
+    public static string DocsXmlPath(string root) => Path.Combine(
+        root, "tools", "apigen", "pkhex-core-docs.xml");
 
     /// <summary>C#-flavored type rendering: keywords for primitives, `DateOnly?`, generics without arity suffixes.</summary>
     private sealed class TypeNameFormatter
