@@ -4,13 +4,13 @@ Date: 2026-08-25 · Status: Accepted · Decided in [Define v2 snapshot semantics
 
 ## Context
 
-The v1 binding registers fresh entity handles on every accessor call (`GameBoxMonHandles` / `GamePartyMonHandles`): each `box()` call returns new JS objects, though they behave as live views — field reads hit wasm state at call time, setters flush into the save immediately, and `saveBytes` serializes whatever was applied. The entity/game registries are unbounded; only `Close(game)` exists (cascading to its entities).
+The v1 Binding registers fresh entity handles on every accessor call (`GameBoxMonHandles` / `GamePartyMonHandles`): each `box()` call returns new JS objects, though they behave as live views — field reads hit wasm state at call time, setters flush into the save immediately, and `saveBytes` serializes whatever was applied. The entity/game registries are unbounded; only `Close(game)` exists (cascading to its entities).
 
 The v2 projection multiplies both sides of this problem: ~200 members per entity make consumers hold and pass references, and bags/dex/daycare materialize many more entities per save. The ticket asked four questions — snapshot identity, staleness, write timing, registry bounds — plus narrowing safety for the per-format interfaces.
 
 ## Decision
 
-**Stable handles.** One projected JS object exists per stored-entity coordinate — `(save, box, slot)` or `(save, party slot)` — created on first access and returned on every later access. Two reads of box 0 slot 0 yield the same object. The cache is keyed by slot coordinates; invalidation becomes relevant only when storage-rearrangement operations land (utility follow-up effort, out of scope).
+**Stable handles.** One projected JS object exists per stored-entity coordinate — `(save, box, slot)` or `(save, party slot)` — created on first access and returned on every later access. Two reads of box 0 slot 0 yield the same object. The cache is keyed by slot coordinates; invalidation becomes relevant only when storage-rearrangement operations land (utility follow-up effort, out of scope). Each handle **pins one underlying entity instance** for its lifetime — reads materialize from the pinned instance rather than re-decoding the slot, so a handle never silently rebinds mid-life. If storage operations ever empty a slot that holds live handles (future scope), those handles continue operating on their pinned instances; reconciling such orphans belongs to that future effort.
 
 **Handles are always live.** Every field read reflects current state at read time; there are no built-in point-in-time copies in the surface. Consumers needing a frozen value use shallow spread (`{ ...mon }`) — documented as the snapshot idiom, not an API. A `.snapshot()` method may be added additively later without breaking anything.
 
@@ -18,7 +18,7 @@ The v2 projection multiplies both sides of this problem: ~200 members per entity
 
 **Explicit close, documented leak otherwise.** Entity handles gain `close()`; game handles keep theirs and continue cascading to every entity they registered. Dropping references without closing leaks wasm-side entries until process exit — the documented v1 trade-off stands, now with a deterministic escape hatch. `FinalizationRegistry` auto-cleanup is rejected: GC timing must not own cross-boundary lifetimes.
 
-**Format interfaces never mutate.** Core never changes a PKM's concrete format class in place — conversions (`ConvertToPK4()` and siblings) produce new instances, and cross-context insertion goes through adaptation that creates new entities. Within a loaded save nothing on the surface, including species writes, alters the format family. Invariant: a projected view's format interface is fixed by the save's EntityContext at load and remains valid for the handle's life; any future transfer feature returns new handles rather than reshaping existing views.
+**Format interfaces never mutate.** Core never changes a PKM's concrete format class in place — conversions (`ConvertToPK4()` and siblings) produce new instances, and cross-context insertion goes through adaptation that creates new entities. Within a loaded save nothing on the surface, including species writes, alters the format family. Invariant: a handle's format interface is fixed by the save's EntityContext at load and remains valid for the handle's life; any future transfer feature returns new handles rather than reshaping existing ones.
 
 ## Consequences
 
