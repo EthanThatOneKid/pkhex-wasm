@@ -2,7 +2,7 @@
 
 PKHeX.Core Pokémon save editing, compiled to WebAssembly and packaged for npm — so JavaScript apps can load, read, edit, and export save files entirely in the browser.
 
-> **Status: v1 specification locked.** The full JS API contract lives at [`docs/spec/v1-api.md`](docs/spec/v1-api.md) — hosting, transport, crypto, support tiers, testing and packaging gates are all decided ([wayfinder map](https://github.com/EthanThatOneKid/pkhex-wasm/issues/1)). Not yet published to npm; implementation is underway from the locked spec. Browsable API docs: <https://ethanthatonekid.github.io/pkhex-wasm/>
+> **Status: v1 shipped via GitHub Releases.** The JS API contract lives at [`docs/spec/v1-api.md`](docs/spec/v1-api.md); install with `npm install github:EthanThatOneKid/pkhex-wasm#v0.1.0` (npm registry publishing is parked). Browsable API docs: <https://ethanthatonekid.github.io/pkhex-wasm/>
 
 ## What works today
 
@@ -79,7 +79,7 @@ into a gitignored directory — no binaries are committed. A gitignored
 
 ## Roadmap
 
-Every decision feeding v1 is resolved — see [Decisions so far](https://github.com/EthanThatOneKid/pkhex-wasm/issues/1) on the map. Next: implementation sessions building against [`docs/spec/v1-api.md`](docs/spec/v1-api.md), then npm publication under the packaging gates it defines.
+Every decision feeding v1 is resolved — see [Decisions so far](https://github.com/EthanThatOneKid/pkhex-wasm/issues/15) on the map. Pushing a `v*` tag runs the release workflow: full gates, then a GitHub Release carrying the package tarball + GPL compliance kit. npm registry publishing is parked; install from GitHub.
 
 ## License
 

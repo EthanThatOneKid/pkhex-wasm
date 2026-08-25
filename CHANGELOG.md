@@ -4,7 +4,10 @@ All notable changes to pkhex-wasm are noted here. Format: [Keep a
 Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows the
 semver call in [CONTRIBUTING.md](CONTRIBUTING.md#upstream-sync-ritual).
 
-## Unreleased
+## [0.1.0] - 2026-08-24
+
+First tagged release, distributed via GitHub Releases (npm registry publishing
+is parked; install with `npm install github:EthanThatOneKid/pkhex-wasm#v0.1.0`).
 
 ### Added
 
