@@ -27,8 +27,8 @@ import { brotliCompressSync, gzipSync } from "node:zlib";import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { build as esbuildBuild } from "esbuild";
 import { buildCompleteSource, run, writeUpstreamJson } from "./lib/kit.mjs";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -51,10 +51,6 @@ function gitOut(args) {
   return res.stdout.trim();
 }
 
-function esbuildBin() {
-  return createRequire(import.meta.url).resolve("esbuild/bin/esbuild");
-}
-
 // ---- 1. fresh publish of the wasm host -------------------------------------
 
 rmSync(SITE, { recursive: true, force: true });
@@ -72,14 +68,15 @@ if (!existsSync(publishedFramework)) {
 
 mkdirSync(FRAMEWORK, { recursive: true });
 log("bundling ESM entry…");
-run(process.execPath, [
-  esbuildBin(),
-  "src/ts/index.ts",
-  "--bundle",
-  "--format=esm",
-  "--platform=browser",
-  `--outfile=${join(STAGE, "index.js")}`,
-]);
+// Via the JS API — spawning `node node_modules/esbuild/bin/esbuild` breaks on
+// Linux, where the postinstall swaps that shim for the raw ELF binary.
+await esbuildBuild({
+  entryPoints: [join(ROOT, "src", "ts", "index.ts")],
+  bundle: true,
+  format: "esm",
+  platform: "browser",
+  outfile: join(STAGE, "index.js"),
+});
 cpSync(join(ROOT, "tools", "apigen", "fixtures", "pkhex-wasm.d.ts"), join(STAGE, "index.d.ts"));
 
 log("staging wasm runtime…");
