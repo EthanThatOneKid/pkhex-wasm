@@ -1,5 +1,6 @@
 ﻿import { strict as assert } from "node:assert";
-import { projectMemberName, projectType } from "./transform.ts";
+import { projectMemberName, projectType, shortEnumLookup } from "./transform.ts";
+import { MEMBER_NAME_OVERRIDES } from "./overrides.ts";
 
 // ---------------------------------------------------------------------------
 // ADR 0001 naming transform: segmented rule over underscores/digits/acronyms,
@@ -27,9 +28,10 @@ Deno.test("member names follow the segmented mechanical transform", () => {
     ["AffixedRibbon", "affixedRibbon"],
     ["RibbonMarkLunchtime", "ribbonMarkLunchtime"],
     ["Move1_PPUps", "move1PpUps"],
-    ["SetIVs", "setIvs"],
-    ["IVs", "ivs"], // mechanical result; the override table maps this one
+    ["SetIVs", "setIvs"], // scanner's acronym merge reassembles I+Vs
+    ["IVs", "ivs"], // same merge, standalone
     ["NicknameTrash", "nicknameTrash"],
+    ["A_B_C", "abc"], // single-letter groups merge; documented quirk
   ];
   for (const [input, expected] of cases) {
     assert.equal(projectMemberName(input), expected, `name: ${input}`);
@@ -37,9 +39,11 @@ Deno.test("member names follow the segmented mechanical transform", () => {
 });
 
 Deno.test("override table wins over the mechanical transform", () => {
-  const overrides: Record<string, string> = { IVs: "ivs", EVs: "evs" };
-  assert.equal(projectMemberName("IVs", overrides), "ivs");
-  assert.equal(projectMemberName("EVs", overrides), "evs");
+  // The shipped table starts empty (mechanics cover all known names); prove
+  // the lookup contract with a synthetic entry so the wiring stays tested.
+  const overrides = { ...MEMBER_NAME_OVERRIDES, SomeWeirdFlag: "sensible" };
+  assert.equal(projectMemberName("SomeWeirdFlag", overrides), "sensible");
+  assert.equal(projectMemberName("Nickname", overrides), "nickname");
 });
 
 // ---------------------------------------------------------------------------
@@ -102,4 +106,26 @@ Deno.test("enums render as generated string-literal unions from the metadata tab
 
 Deno.test("unknown named types pass through verbatim for later resolution", () => {
   assert.equal(projectType("PersonalInfo"), "PersonalInfo");
+});
+
+Deno.test("unions parenthesize when nested as element or member types", () => {
+  const marks = { PokegearNumber: ["None", "Kenny"] };
+  assert.equal(
+    projectType("Span<PokegearNumber>", marks),
+    'readonly ("None" | "Kenny")[]',
+  );
+  assert.equal(projectType("PokegearNumber[]", marks), 'readonly ("None" | "Kenny")[]');
+});
+
+Deno.test("shortEnumLookup adapts FQN-keyed metadata to member type strings", () => {
+  const metaEnums = {
+    "PKHeX.Core.Nature": { name: "Nature", values: [{ name: "Hardy" }, { name: "Lonely" }] },
+    "PKHeX.Core.InventoryType": {
+      name: "InventoryType",
+      values: [{ name: "None" }, { name: "Items" }],
+    },
+  };
+  const lookup = shortEnumLookup(metaEnums);
+  assert.deepEqual(Object.keys(lookup).sort(), ["InventoryType", "Nature"]);
+  assert.equal(projectType("Nature", lookup), '"Hardy" | "Lonely"');
 });

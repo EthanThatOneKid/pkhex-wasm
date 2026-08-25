@@ -16,10 +16,10 @@ The [surface inventory](https://github.com/EthanThatOneKid/pkhex-wasm/blob/resea
 | --- | --- |
 | `byte` `sbyte` `short` `ushort` `int` `uint` | `number` |
 | `long` `ulong` (true 64-bit, e.g. `Tracker`, `JunkData`) | `bigint` |
-| `float` `double` | `number` |
+| `float` `double` `decimal` | `number` |
 | `bool` / `string` | `boolean` / `string` |
 | `byte[]`, `Span<byte>`, `ReadOnlySpan<byte>`, `Memory<byte>` | `Uint8Array` (copied at the boundary) |
-| Non-byte spans and arrays (`ReadOnlySpan<ushort>`, `ushort[]`, `int[]`) | readonly `number[]` snapshots |
+| Non-byte spans and arrays (`ReadOnlySpan<ushort>`, `ushort[]`, `int[]`, `bool[]`) | readonly snapshots of the mapped element type |
 | Reference collections (`IList<T>`, `IReadOnlyList<T>` of class types) | readonly array snapshots of projected views |
 | `DateOnly?` / `TimeOnly?` | ISO strings (`"2023-04-05"`, `"HH:mm:ss"`) or `null` |
 | C# enums | generated string-literal unions; name↔value tables live in the metadata (see below) |

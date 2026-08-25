@@ -11,8 +11,9 @@
  *   OT_Name         -> otName
  *   TID16           -> tid16
  *
- * Hostile stragglers (e.g. `IVs` → mechanically `iVs`) go through the
- * explicit override table passed by the caller — never edited here.
+ * Hostile stragglers route through the explicit override table passed by
+ * the caller (`overrides.ts`) — never edited here. The scanner's merge pass
+ * already renders `SetIVs -> setIvs`, so today's table starts empty.
  */
 
 const LOWER_UPPER = /([a-z])([A-Z])/g;
@@ -95,6 +96,7 @@ const PRIMITIVES: Record<string, string> = {
   ulong: "bigint",
   float: "number",
   double: "number",
+  decimal: "number",
   bool: "boolean",
   string: "string",
   // System date-only/time-only values project as ISO strings (ADR 0001).
@@ -125,17 +127,17 @@ export function projectType(
 
   const array = /^([\w.]+)\[\]$/.exec(csType);
   if (array) {
-    return `readonly ${projectType(array[1], enums)}[]`;
+    return `readonly ${wrapIfUnion(projectType(array[1], enums))}[]`;
   }
 
   const span = /^(ReadOnly)?Span<(.+)>$/.exec(csType);
   if (span) {
-    return `readonly ${projectType(span[2], enums)}[]`;
+    return `readonly ${wrapIfUnion(projectType(span[2], enums))}[]`;
   }
 
   const collection = /^(IList|IReadOnlyList|List|IEnumerable|ICollection)<(.+)>$/.exec(csType);
   if (collection) {
-    return `readonly ${projectType(collection[2], enums)}[]`;
+    return `readonly ${wrapIfUnion(projectType(collection[2], enums))}[]`;
   }
 
   const enumValues = enums?.[csType];
@@ -146,4 +148,27 @@ export function projectType(
   // Named references (classes, interfaces, structs like PersonalInfo) pass
   // through verbatim; their declarations are projected alongside.
   return csType;
+}
+
+/** Unions need parens when they become an array's element type. */
+function wrapIfUnion(tsType: string): string {
+  return tsType.includes(" | ") ? `(${tsType})` : tsType;
+}
+
+/**
+ * Adapts the reflector's FQN-keyed enum tables (`PKHeX.Core.Nature`) to the
+ * short-name keys member type strings use ("Nature"). Callers building a
+ * transform context from runtime-meta-v2.json run this once.
+ */
+export function shortEnumLookup(
+  enumsByFqn: Record<string, { name: string; values: { name: string }[] }>,
+): Record<string, readonly string[]> {
+  const lookup: Record<string, readonly string[]> = {};
+  for (const [fqn, info] of Object.entries(enumsByFqn)) {
+    const short = fqn.split(".").pop() ?? fqn;
+    if (!(short in lookup)) {
+      lookup[short] = info.values.map((v) => v.name);
+    }
+  }
+  return lookup;
 }
