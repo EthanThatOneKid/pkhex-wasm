@@ -17,6 +17,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\PKHexWasm\PKHexWasm.csproj" />
     <ProjectReference Include="..\PKHexWasm.TestSupport\PKHexWasm.TestSupport.csproj" />
+    <ProjectReference Include="..\..\tools\reflector\reflector.csproj" />
   </ItemGroup>
 
   <ItemGroup>

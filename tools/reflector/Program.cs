@@ -61,7 +61,76 @@ var jsonOptions = new JsonSerializerOptions
 var outPath = Path.Combine(root, "tools", "apigen", "runtime-meta.json");
 File.WriteAllText(outPath, JsonSerializer.Serialize(meta, jsonOptions) + Environment.NewLine);
 Console.WriteLine($"reflect: {methods.Count} export(s) → {Path.GetRelativePath(root, outPath)}");
+
+// ---- v2: scan the vendored Core hierarchy (ADR 0001 raw facts) -------------
+
+var coreDir = Path.Combine(
+    root, "external", "PKHeX.Everywhere", "external", "PKHeX", "PKHeX.Core");
+var coreDll = Path.Combine(coreDir, "bin", "Release", "net10.0", "PKHeX.Core.dll");
+if (!File.Exists(coreDll))
+{
+    Console.WriteLine("reflect: PKHeX.Core.dll not built — skipping v2 metadata (build the solution first)");
+    return 0;
+}
+
+var coreXml = Path.ChangeExtension(coreDll, ".xml");
+EnsureDocsXml(coreDir, coreDll, coreXml);
+
+var commit = Run("git", ["-C",
+    Path.Combine("external", "PKHeX.Everywhere", "external", "PKHeX"), "rev-parse", "HEAD"], root);
+
+var coreMeta = PKHexWasm.Reflector.CoreScan.Scan([coreDll], File.Exists(coreXml) ? coreXml : null, commit);
+var v2Path = Path.Combine(root, "tools", "apigen", "runtime-meta-v2.json");
+File.WriteAllText(v2Path, JsonSerializer.Serialize(coreMeta, jsonOptions) + Environment.NewLine);
+Console.WriteLine(
+    $"reflect: {coreMeta.Classes.Count} class(es), {coreMeta.Classes.Values.Sum(c => c.Members.Length)} member(s), {coreMeta.Enums.Count} enum(s) → {Path.GetRelativePath(root, v2Path)}");
 return 0;
+
+/// <summary>
+/// Doc comments come from a generated XML file; the vendored project does not
+/// emit one by default, so build it (into its own gitignored bin/) on demand.
+/// </summary>
+static void EnsureDocsXml(string coreDir, string coreDll, string coreXml)
+{
+    if (File.Exists(coreXml) && File.GetLastWriteTimeUtc(coreXml) >= File.GetLastWriteTimeUtc(coreDll))
+    {
+        return;
+    }
+    Console.WriteLine("reflect: generating PKHeX.Core.xml documentation file…");
+    Run("dotnet", ["build",
+        Path.Combine(coreDir, "PKHeX.Core.csproj"),
+        "-c", "Release",
+        "-p:GenerateDocumentationFile=true",
+        "--nologo", "-v", "q"], Directory.GetCurrentDirectory());
+    if (!File.Exists(coreXml))
+    {
+        Console.WriteLine("reflect: warning — doc XML not produced; members will carry no docs");
+    }
+}
+
+static string Run(string program, string[] args, string cwd)
+{
+    var psi = new System.Diagnostics.ProcessStartInfo
+    {
+        FileName = program,
+        Arguments = string.Join(' ', args.Select(Quote)),
+        WorkingDirectory = cwd,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+    };
+    using var p = System.Diagnostics.Process.Start(psi)
+        ?? throw new InvalidOperationException($"failed to start {program}");
+    var stdout = p.StandardOutput.ReadToEnd().Trim();
+    p.WaitForExit();
+    if (p.ExitCode != 0)
+    {
+        throw new InvalidOperationException($"{program} exited {p.ExitCode}: {p.StandardError.ReadToEnd()}");
+    }
+    return stdout;
+
+    static string Quote(string arg) =>
+        arg.Contains(' ') ? $"\"{arg}\"" : arg;
+}
 
 static string FindRepoRoot()
 {
