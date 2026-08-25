@@ -14,10 +14,42 @@ export const test = base.extend<{ api: Page }>({
     async ({ browser }, use) => {
       const context = await browser.newContext();
       const page = await context.newPage();
+
+      // Flake insurance: intermittent reds have surfaced only as an opaque
+      // "reading 'create'" state message. Buffer browser-side chatter so a
+      // failing boot names its real cause in the Playwright failure itself.
+      const diagnostics: string[] = [];
+      const note = (line: string) => {
+        if (diagnostics.length < 20) diagnostics.push(line);
+      };
+      page.on("console", (m) => note(`console.${m.type()}: ${m.text()}`));
+      page.on("pageerror", (e) => note(`pageerror: ${e.message}`));
+
       await page.goto("/");
-      await expect
-        .poll(() => page.locator("#state").textContent(), { timeout: 90_000 })
-        .toBe("ready");
+      try {
+        await expect
+          .poll(() => page.locator("#state").textContent(), { timeout: 90_000 })
+          .toBe("ready");
+      } catch (err) {
+        let probe: string;
+        try {
+          const res = await page.request.get("wasm/_framework/dotnet.js");
+          const body = await res.text();
+          probe =
+            `dotnet.js status=${res.status()} type=${res.headers()["content-type"] ?? "?"} ` +
+            `bytes=${body.length} head=${JSON.stringify(body.slice(0, 160))}`;
+        } catch (probeErr) {
+          probe = `dotnet.js probe failed: ${probeErr instanceof Error ? probeErr.message : probeErr}`;
+        }
+        throw new Error(
+          [
+            "bootstrap did not reach ready",
+            ...diagnostics,
+            probe,
+            `(original error: ${err instanceof Error ? err.message : err})`,
+          ].join("\n"),
+        );
+      }
       await use(page);
       await context.close();
     },

@@ -66,6 +66,17 @@ jobs:
         working-directory: tests/e2e
         run: npx playwright test
 
+      # Intermittent e2e reds have served a bad dotnet.js; ship the actual
+      # served runtime so the failing bytes can be inspected post-mortem.
+      - name: Upload served wasm runtime for diagnosis
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-site-framework
+          path: artifacts/e2e-site/wwwroot/_framework
+          retention-days: 7
+          if-no-files-found: ignore
+
       - name: Package + size budget gate (8 MB gz first-load)
         run: |
           npm ci --prefix tools/package
