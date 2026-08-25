@@ -62,6 +62,8 @@ Enum name↔value tables are part of these raw facts — captured at scan time s
 
 **Tier checks stay out of scope here.** Per-member availability/tier encoding remains fog on the map until the snapshot-semantics ticket lands; this contract only fixes how members are *shaped*.
 
+**Documentation source stays in-repo tooling.** DocFX was evaluated for richer prose extraction and rejected: it would recompute member shapes we already obtain from assembly metadata, interpose its own uid-model schema between the reflector and `runtime-meta-v2.json`, and couple output determinism to a third-party toolchain version. If prose depth ever needs to exceed what the generated XML file carries (e.g., `<inheritdoc>` resolution across interface chains), the upgrade path is an additive Roslyn pass inside `tools/reflector` — member facts stay on MetadataLoadContext either way. Ceiling worth remembering: upstream documents PKHeX.Core sparsely, so no extraction mechanism can deepen prose that was never written.
+
 ## Consequences
 
 - Every projected artifact is deterministic given (Core source, metadata schema, transform): the inverted drift gate can fail CI on any unmapped Core member.
