@@ -43,3 +43,7 @@ _Avoid_: "runtime backend"
 **Managed crypto**:
 Vendored pure-C# MD5/AES implementations registered into `RuntimeCryptographyProvider` at init; no JavaScript crypto involvement anywhere.
 _Avoid_: "crypto bridge", "JS bridge"
+
+**Projection**:
+The systematic copying of Core's shapes, types, and methods into TypeScript — Roslyn scans the C# source, ts-morph emits; names follow a mechanical transform with drift-gated overrides.
+_Avoid_: "mirror", "the port"
