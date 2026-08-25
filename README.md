@@ -2,7 +2,54 @@
 
 PKHeX.Core Pokémon save editing, compiled to WebAssembly and packaged for npm — so JavaScript apps can load, read, edit, and export save files entirely in the browser.
 
-> **Status: v1 shipped via GitHub Releases.** The JS API contract lives at [`docs/spec/v1-api.md`](docs/spec/v1-api.md); install with `npm install github:EthanThatOneKid/pkhex-wasm#v0.1.0` (npm registry publishing is parked). Browsable API docs: <https://ethanthatonekid.github.io/pkhex-wasm/>
+> **Status: v1 shipped via GitHub Releases.** The JS API contract lives at [`docs/spec/v1-api.md`](docs/spec/v1-api.md). Browsable API docs: <https://ethanthatonekid.github.io/pkhex-wasm/>
+
+## Usage
+
+Install into your TypeScript app straight from GitHub (no npm registry involved):
+
+```bash
+npm install github:EthanThatOneKid/pkhex-wasm#v0.1.0
+```
+
+The install runs a small `prepare` script that downloads the packaged tarball for
+that version from [GitHub Releases](https://github.com/EthanThatOneKid/pkhex-wasm/releases)
+into `dist/` — no .NET toolchain or submodules needed on your side. (Installing
+a ref between releases falls back to the latest release with a warning. Prefer a
+tarball by hand? Grab `pkhex-wasm-x.y.z.tgz` from the Release page and
+`npm install ./pkhex-wasm-x.y.z.tgz`.)
+
+Then:
+
+```ts
+import { initPKHex } from "pkhex-wasm";
+
+// One-time async wasm bootstrap; everything after is synchronous.
+const PKHex = await initPKHex();
+
+// Parse one complete logical save buffer (defensively copied).
+const game = PKHex.load(saveBytes);
+
+console.log(PKHex.species.get(game.party()[0].species.id)?.name); // "Pikachu"
+
+// Entity handles write through; export reflects every mutation.
+game.box(0)[0]?.setNickname("Sparky");
+const out: Uint8Array = PKHex.saveBytes(game);
+```
+
+What you get on the root:
+
+- **Lookup tables** — `PKHex.species` / `natures` / `moves`: `get(id)` → `{ id, name, … }`, `all()`. Items are per-game: `game.items`.
+- **Save handle** (`game`) — `trainer`, `boxCount`, `generation`; snapshots via `game.box(i)` / `game.party()` returning entity handles.
+- **Entity handles** — reads (`species`, `nickname`, `level`, `isShiny`, `ivs`/`evs`/`stats`, four move slots, nature, original trainer) plus mutators: `setNickname`, `setLevel`, `setMoves([m1, m2, m3, m4])`, `setNature(id)`, `setShiny(bool)`, `setIVs(partial)`, `setEVs(partial)`.
+
+Tier behavior: **edit tier** (all mutators apply) covers Gen 3–7, SwSh, BDSP, SV and Legends Z-A; **read-only tier** (mutators throw) covers Gen 1–2, LGPE and PLA. Failures surface as typed errors — `SaveParseError` from `load`, `UnsupportedTierError` / `UnsupportedOperationError` from mutators, `RangeError` for value limits.
+
+Bundlers note: the runtime assets under the package's `wasm/_framework/` must stay siblings of `index.js` — the default `initPKHex()` resolves them relative to the module URL. If your bundler chokes on them, copy `wasm/` alongside your output and pass `initPKHex({ wasmBaseUrl })`.
+
+A runnable CLI example lives at [`examples/deno-cli.ts`](examples/deno-cli.ts)
+(`deno run -A examples/deno-cli.ts <save>` prints a save's party).
+
 
 ## What works today
 
@@ -73,13 +120,14 @@ into a gitignored directory — no binaries are committed. A gitignored
 | `tests/e2e` | Playwright E2E suite driving the published site in headless Chromium |
 | `tests/crypto-vectors.json` | Shared RFC 1321 / NIST SP 800-38A vectors consumed by both test layers |
 | `tools/package` | Packaging pipeline: docxodus-shaped npm tarball, brotli siblings, GPL compliance kit, size gate |
+| `scripts/prepare-dist.mjs` | npm `prepare` hook backing git-based installs: pulls this repo's Release tarball into `dist/` |
 | `examples/deno-cli.ts` | Minimal CLI usage: print a save's party (`deno run -A examples/deno-cli.ts <save>`) |
 | `docs/spec/v1-api.md` | The locked v1 JavaScript API specification |
 | `external/PKHeX.Everywhere` | Vendored upstream (MIT facade/web layers wrapping the GPLv3 `PKHeX.Core` fork, itself a nested submodule) |
 
 ## Roadmap
 
-Every decision feeding v1 is resolved — see [Decisions so far](https://github.com/EthanThatOneKid/pkhex-wasm/issues/15) on the map. Pushing a `v*` tag runs the release workflow: full gates, then a GitHub Release carrying the package tarball + GPL compliance kit. npm registry publishing is parked; install from GitHub.
+Every decision feeding v1 is resolved — see the completed [v1 map](https://github.com/EthanThatOneKid/pkhex-wasm/issues/15); the active effort is [v2: the complete API surface projected from Core](https://github.com/EthanThatOneKid/pkhex-wasm/issues/30). Pushing a `v*` tag runs the release workflow: full gates, then a GitHub Release carrying the package tarball + GPL compliance kit. npm registry publishing is parked; install from GitHub (see [Usage](#usage)).
 
 ## License
 
