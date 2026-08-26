@@ -143,4 +143,86 @@ public static partial class PkHexExports
     [JSExport]
     [JsThrows("UnsupportedTierError", "on read-only-tier saves")]
     public static void MonSetEVs(int mon, int[] evs) => PKHexApi.MonSetEVs(mon, evs);
+
+    // ---- v2 generic accessor (ticket #36) ---------------------------------
+
+    /// <summary>Initialises the property registry; idempotent.</summary>
+    [JSExport]
+    public static void InitV2() { /* PropertyRegistry static ctor fires on first access */ _ = typeof(PropertyRegistry); }
+
+    /// <summary>Load a save and return a v2 generic-accessor game handle.</summary>
+    [JSExport]
+    [JsThrows("SaveParseError", "when the bytes match no supported format")]
+    public static int LoadV2(byte[] saveBytes)
+    {
+        ArgumentNullException.ThrowIfNull(saveBytes);
+        var copy = new byte[saveBytes.Length];
+        Array.Copy(saveBytes, copy, saveBytes.Length);
+
+        SaveFile? sav;
+        try { sav = SaveUtil.GetSaveFile(copy); }
+        catch (Exception ex) { throw new InvalidDataException("Unrecognized save file format.", ex); }
+        if (sav is null) throw new InvalidDataException("Unrecognized save file format.");
+
+        return GenericAccessor.CreateHandle("SaveFile", sav);
+    }
+
+    [JSExport]
+    public static byte[] SaveBytesV2(int game)
+    {
+        var entry = GenericAccessor.GetHandle(game);
+        return ((SaveFile)entry.Value).Write().ToArray();
+    }
+
+    [JSExport]
+    public static void CloseV2(int game) => GenericAccessor.RemoveHandle(game);
+
+    /// <summary>Box contents as v2 entity handles; empty slots are absent.</summary>
+    [JSExport]
+    [JsThrows("RangeError", "when boxIndex is outside [0, boxCount)")]
+    public static int[] GetBoxMonHandlesV2(int game, int boxIndex)
+    {
+        var entry = GenericAccessor.GetHandle(game);
+        var sav = (SaveFile)entry.Value;
+        if ((uint)boxIndex >= (uint)sav.BoxCount)
+            throw new ArgumentOutOfRangeException(nameof(boxIndex), boxIndex,
+                $"box index outside [0, {sav.BoxCount})");
+
+        var handles = new List<int>(sav.BoxSlotCount);
+        for (var slot = 0; slot < sav.BoxSlotCount; slot++)
+        {
+            var pk = sav.GetBoxSlotAtIndex(boxIndex, slot);
+            if (pk.Species != 0)
+                handles.Add(GenericAccessor.CreateHandle("PKM", pk));
+        }
+        return [.. handles];
+    }
+
+    [JSExport]
+    public static int[] GetPartyMonHandlesV2(int game)
+    {
+        var entry = GenericAccessor.GetHandle(game);
+        var sav = (SaveFile)entry.Value;
+        var handles = new List<int>(sav.PartyCount);
+        for (var slot = 0; slot < sav.PartyCount; slot++)
+        {
+            var pk = sav.GetPartySlotAtIndex(slot);
+            if (pk.Species != 0)
+                handles.Add(GenericAccessor.CreateHandle("PKM", pk));
+        }
+        return [.. handles];
+    }
+
+    /// <summary>Read any projected member by name.</summary>
+    [JSExport]
+    [JsThrows("RangeError", "when the handle or member is unknown")]
+    public static object? GetMember(int handle, string memberId) =>
+        GenericAccessor.GetMember(handle, memberId);
+
+    /// <summary>Write any projected member by name.</summary>
+    [JSExport]
+    [JsThrows("UnsupportedTierError", "on read-only-tier saves")]
+    [JsThrows("RangeError", "when the handle or member is unknown")]
+    public static void SetMember(int handle, string memberId, object value) =>
+        GenericAccessor.SetMember(handle, memberId, value);
 }
