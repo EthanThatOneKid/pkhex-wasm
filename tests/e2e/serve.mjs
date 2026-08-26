@@ -65,7 +65,14 @@ function respond(res, file) {
   res.end(readFileSync(file));
 }
 
-/** Maps `<dir>/<stem>.<ext>` onto the single `<dir>/<stem>.<hash>.<ext>` sibling when the plain name is absent. */
+/** Maps `<dir>/<stem>.<ext>` onto the single `<dir>/<stem>.<hash>.<ext>` sibling when the plain name is absent.
+ *
+ * Only exact `<stem>.<hash>.<ext>` siblings qualify: sub-assets share the
+ * stem prefix ("dotnet.native.<hash>.js", "dotnet.runtime.<hash>.js") and,
+ * before this filter, filesystem-dependent readdir order could serve the
+ * native runtime glue where tests expected the bootstrapper — an
+ * intermittent failure that looked like a broken wasm build.
+ */
 function resolveFingerprint(file) {
   if (existsSync(file)) return file;
   const dot = file.lastIndexOf(".");
@@ -74,7 +81,8 @@ function resolveFingerprint(file) {
   const stem = file.slice(file.lastIndexOf(sep) + 1, dot);
   const ext = file.slice(dot);
   try {
-    const match = readdirSync(parent).find((f) => f.startsWith(`${stem}.`) && f.endsWith(ext));
+    const pattern = new RegExp(`^${stem}\\.[A-Za-z0-9]+\\${ext}$`);
+    const match = readdirSync(parent).filter((f) => pattern.test(f)).sort()[0];
     return match ? join(parent, match) : file;
   } catch {
     return file;

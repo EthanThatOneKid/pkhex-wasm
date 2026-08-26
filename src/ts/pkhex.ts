@@ -102,7 +102,32 @@ async function createRoot(options?: InitOptions): Promise<PKHex> {
     );
   }
 
-  const runtime = await mod.dotnet.create();
+  // SDK generations differ in how the bootstrapper exposes itself: modern
+  // builds export a named `dotnet` object, others ship only a default export
+  // or the bare `createDotnetRuntime` factory. Normalize once, here.
+  const asFactory = (x: unknown): { create(): Promise<DotnetRuntime> } | undefined => {
+    if (typeof x === "function") return { create: x as () => Promise<DotnetRuntime> };
+    if (x && typeof (x as { create?: unknown }).create === "function") {
+      return x as { create(): Promise<DotnetRuntime> };
+    }
+    return undefined;
+  };
+  const candidate = mod as unknown as {
+    dotnet?: unknown;
+    default?: unknown;
+    createDotnetRuntime?: unknown;
+  };
+  const factory = asFactory(candidate.dotnet) ??
+    asFactory(candidate.default) ?? asFactory(candidate.createDotnetRuntime);
+  if (!factory) {
+    throw new Error(
+      `pkhex-wasm: dotnet.js at ${normalized} exposed no runtime factory (exports: ${
+        Object.keys(mod).join(", ") || "none"
+      })`,
+    );
+  }
+
+  const runtime = await factory.create();
   const config = runtime.getConfig();
   const allExports = (await runtime.getAssemblyExports(config.mainAssemblyName)) as {
     PKHexWasm?: { Wasm?: { PkHexExports?: PkHexApiExports } };
