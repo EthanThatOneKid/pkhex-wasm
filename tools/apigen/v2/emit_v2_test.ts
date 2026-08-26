@@ -57,6 +57,17 @@ const synthetic: CoreMetaLike = {
       entityContext: "Gen9",
       members: [
         {
+          csName: "Nickname",
+          kind: "property",
+          csType: "string",
+          access: "getSet",
+          computed: false,
+          isStatic: false,
+          declaredBy: "NS.PK9",
+          docs: null,
+          params: [],
+        },
+        {
           csName: "TeraTypeOverride",
           kind: "property",
           csType: "MoveType",
@@ -171,6 +182,16 @@ Deno.test("unresolved references gain deterministic unknown stubs", () => {
   assert.ok(!content.includes("export type PK9 = unknown;"), "projected classes are known");
 });
 
+Deno.test("members hidden by an ancestor are suppressed from output but counted", () => {
+  const out = emitV2Dts(synthetic);
+  assert.equal(
+    (out.content.match(/readonly nickname:/g) ?? []).length,
+    1,
+    "only PKM's declaration survives",
+  );
+  assert.equal(out.stats.shadowed, 1);
+});
+
 // --- real-metadata smoke -----------------------------------------------------
 
 Deno.test("full runtime metadata emits completely and deterministically", async () => {
@@ -191,4 +212,6 @@ Deno.test("full runtime metadata emits completely and deterministically", async 
   // Static-kind classes emit namespaces only; every other class emits one interface.
   const interfaces = Object.values(meta.classes).filter((c) => c.kind !== "static").length;
   assert.equal(first.stats.classes, interfaces);
+  // Real Core formats hide ancestor members (GBPKML, SK2); suppression must be live.
+  assert.ok(first.stats.shadowed > 0, "expected ancestor-shadowed members in real metadata");
 });

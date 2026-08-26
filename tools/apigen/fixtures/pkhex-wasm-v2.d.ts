@@ -6565,3 +6565,4 @@ export type Zukan9 = unknown;
 export type Zukan9a = unknown;
 export type ZukanSpinda8b = unknown;
 
+/// Consumed 6805 members; suppressed 3593 as ancestor-shadowed.

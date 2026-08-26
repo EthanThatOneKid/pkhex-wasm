@@ -5,8 +5,8 @@ using System.Xml.Linq;
 namespace PKHexWasm.Reflector;
 
 // v2 Core scanner (ADR 0001): reflects over the compiled vendored PKHeX.Core
-// assembly through a MetadataLoadContext and emits RAW C# facts â€” untransformed
-// names/types/access/docs plus declaring-class chains â€” into the shape the API
+// assembly through a MetadataLoadContext and emits RAW C# facts — untransformed
+// names/types/access/docs plus declaring-class chains — into the shape the API
 // generator projects downstream. No casing, no TS types, no availability logic
 // lives here; naming iteration never requires rescanning C#.
 
@@ -67,7 +67,7 @@ public static class CoreScan
 
     /// <summary>
     /// Curated derived/computed members per the projection contract (ADR 0001)
-    /// and the surface inventory Â§4.1: getters that recompute or aggregate, so
+    /// and the surface inventory §4.1: getters that recompute or aggregate, so
     /// emission must treat them read-only even where reflection alone cannot tell.
     /// Name-keyed within any scanned class; extend only with inventory evidence.
     /// </summary>
@@ -77,7 +77,7 @@ public static class CoreScan
         "Generation", "Format", "IsShiny", "TSV", "PSV", "ShinyXor", "Characteristic",
         "Japanese", "Korean", "SpriteItem", "PIDAbility",
         // derived-but-settable: the getter recomputes and the setter re-derives
-        // its storage (CurrentLevel writes EXP) â€” ADR 0001 names it computed so
+        // its storage (CurrentLevel writes EXP) — ADR 0001 names it computed so
         // emission routes mutation through designated mutators only.
         "CurrentLevel",
         // format-computed views
@@ -91,7 +91,7 @@ public static class CoreScan
         "WasEgg", "WasTradedEgg", "IsTradedEgg", "IsUntraded", "HasOriginalMetLocation",
         // save-level aggregations
         "SlotCount", "PlayTimeString", "SeenCount", "CaughtCount", "PercentSeen", "PercentCaught",
-        // NOTE: Nature is deliberately NOT here â€” pre-Gen6 it is PID-derived but
+        // NOTE: Nature is deliberately NOT here — pre-Gen6 it is PID-derived but
         // Gen6+ stores it, so the flag cannot be a per-member scan fact. The
         // concept-aware mutator semantics (map #15's setNature decision) own it.
     ];
@@ -144,7 +144,7 @@ public static class CoreScan
         }
 
         // remaining roots, plus the subtrees that carry per-format surface:
-        // pouch + dex impls and the concrete save classes (SAV1â€¦SAV9), whose
+        // pouch + dex impls and the concrete save classes (SAV1…SAV9), whose
         // distinct members (coins/BP blocks etc.) the save-subsystem work needs.
         foreach (var type in roots.Values)
         {
@@ -338,7 +338,7 @@ public static class CoreScan
         {
             return;
         }
-        // MetadataLoadContext cannot answer Nullable.GetUnderlyingType â€”
+        // MetadataLoadContext cannot answer Nullable.GetUnderlyingType —
         // detect Nullable<T> structurally instead.
         if (type.IsGenericType && type.GetGenericTypeDefinition().FullName == "System.Nullable`1")
         {
@@ -363,7 +363,7 @@ public static class CoreScan
         {
             return;
         }
-        // MetadataLoadContext cannot answer Enum.GetValues â€” read the literal
+        // MetadataLoadContext cannot answer Enum.GetValues — read the literal
         // fields directly, which is fully metadata-driven and deterministic.
         var values = type.GetFields(BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly)
             .Where(f => f.IsLiteral)
@@ -409,7 +409,7 @@ public static class CoreScan
         root, "external", "PKHeX.Everywhere", "external", "PKHeX", "PKHeX.Core");
 
     /// <summary>
-    /// Stable home for the generated XML documentation â€” outside the vendored
+    /// Stable home for the generated XML documentation — outside the vendored
     /// bin/ so IncrementalClean cannot sweep it between builds. Committed
     /// alongside runtime-meta-v2.json, pinned to the same submodule commit.
     /// </summary>

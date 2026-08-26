@@ -21,6 +21,14 @@ export interface EmitStats {
   classes: number;
   members: number;
   guards: number;
+  /** Consumed facts suppressed because an ancestor declares the same member. */
+  shadowed: number;
+}
+
+/** Shared emission context: enum tables plus the unresolved-reference sink. */
+interface EmitContext {
+  enums: Record<string, readonly string[]>;
+  note(tsType: string): void;
 }
 
 /** TS keywords/builtins that always resolve; never stubbed. */
@@ -50,11 +58,10 @@ export function emitV2Dts(meta: CoreMetaLike): {
   const known = new Set<string>(TS_TYPE_WORDS);
   for (const short of Object.keys(enumsShort)) known.add(short);
   for (const fqn of Object.keys(meta.classes)) {
-    const s = shortOf(fqn);
-    known.add(s.includes("`") ? s.slice(0, s.indexOf("`")) : s);
+    known.add(stripArity(shortOf(fqn)));
   }
   const unresolved = new Set<string>();
-  const ctx = { enums: enumsShort, note: (t: string) => scanReferences(t, known, unresolved) };
+  const ctx: EmitContext = { enums: enumsShort, note: (t) => scanReferences(t, known, unresolved) };
   // Declared-member keys per class, used to skip child declarations that
   // merely hide an ancestor member (C# `new` hiding) — TS interfaces cannot
   // express incompatible redeclarations across `extends`.
@@ -63,7 +70,7 @@ export function emitV2Dts(meta: CoreMetaLike): {
     declaredKeys.set(fqn, new Set(cls.members.map(memberKey)));
   }
   const lines: string[] = [];
-  const stats: EmitStats = { classes: 0, members: 0, guards: 0 };
+  const stats: EmitStats = { classes: 0, members: 0, guards: 0, shadowed: 0 };
 
   const totalMembers = Object.values(meta.classes)
     .reduce((sum, c) => sum + c.members.length, 0);
@@ -102,7 +109,7 @@ export function emitV2Dts(meta: CoreMetaLike): {
     if (cls.kind !== "static") {
       const extendsPart = renderExtends(cls, meta.classes, ctx.note);
       lines.push(`export interface ${tsName}${extendsPart} {`);
-      const inherited = inheritedKeys(cls, meta.classes, declaredKeys);
+      const inherited = inheritedKeys(cls, declaredKeys);
       for (const member of instanceMembers) {
         emitMember(lines, member, ctx, stats, false, inherited.has(memberKey(member)));
       }
@@ -113,7 +120,7 @@ export function emitV2Dts(meta: CoreMetaLike): {
 
     if (staticMembers.length > 0) {
       lines.push(`export declare namespace ${tsName} {`);
-      const inherited = inheritedKeys(cls, meta.classes, declaredKeys);
+      const inherited = inheritedKeys(cls, declaredKeys);
       for (const member of staticMembers) {
         emitMember(lines, member, ctx, stats, true, inherited.has(memberKey(member)));
       }
@@ -148,6 +155,10 @@ export function emitV2Dts(meta: CoreMetaLike): {
     lines.push("");
   }
 
+  lines.push(
+    `/// Consumed ${stats.members} members; suppressed ${stats.shadowed} as ancestor-shadowed.`,
+  );
+
   if (stats.members !== totalMembers) {
     throw new Error(
       `completeness violation: emitted ${stats.members} of ${totalMembers} metadata members`,
@@ -176,7 +187,7 @@ function nsName(tsName: string): string {
 function emitMember(
   lines: string[],
   member: MemberLike,
-  ctx: { enums: Record<string, readonly string[]>; note(tsType: string): void },
+  ctx: EmitContext,
   stats: EmitStats,
   ns = false,
   shadowed = false,
@@ -187,9 +198,13 @@ function emitMember(
   ctx.note(tsType);
 
   // Completeness counts every consumed fact even when a shadowed member is
-  // suppressed from output (the ancestor's declaration stands in for it).
+  // suppressed from output; the shadowed counter keeps the suppression set
+  // visible and drift-gated rather than silently absorbed.
   stats.members++;
-  if (shadowed) return;
+  if (shadowed) {
+    stats.shadowed++;
+    return;
+  }
 
   if (member.docs) {
     lines.push(`/** ${member.docs} */`);
@@ -202,9 +217,9 @@ function emitMember(
         return `${p.name}: ${t}`;
       })
       .join(", ");
-    const ret = projectType(member.csType, ctx.enums);
-    // Ambient namespaces require explicit declaration keywords.
-    lines.push(`${ns ? "function " : ""}${tsName}(${params}): ${ret};`);
+    // Ambient namespaces require explicit declaration keywords. The method's
+    // return type is the same csType tsType was mapped from.
+    lines.push(`${ns ? "function " : ""}${tsName}(${params}): ${tsType};`);
   } else if (member.computed || member.access === "get") {
     lines.push(`${ns ? "const" : "readonly"} ${tsName}: ${tsType};`);
   } else {
@@ -228,7 +243,6 @@ function memberKey(m: MemberLike): string {
 /** Union of declared member keys across the class's projected ancestors. */
 function inheritedKeys(
   cls: ClassLike,
-  classes: Record<string, ClassLike>,
   declaredKeys: Map<string, Set<string>>,
 ): Set<string> {
   const keys = new Set<string>();
@@ -267,9 +281,14 @@ function withArity(name: string): string {
   const tick = name.indexOf("`");
   if (tick < 0) return name;
   const arity = Number(name.slice(tick + 1));
-  const base = name.slice(0, tick);
   const params = Array.from({ length: arity }, (_, i) => (i === 0 ? "T" : `T${i + 1}`));
-  return `${base}<${params.join(", ")}>`;
+  return `${stripArity(name)}<${params.join(", ")}>`;
+}
+
+/** Drops the CLR generic-arity suffix ("ZukanBase`1" -> "ZukanBase"). */
+function stripArity(name: string): string {
+  const tick = name.indexOf("`");
+  return tick < 0 ? name : name.slice(0, tick);
 }
 
 const capFirst = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
