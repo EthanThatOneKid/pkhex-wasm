@@ -1,6 +1,9 @@
 import assert from "node:assert";
 import { DTS_PATH } from "./emit-dts.ts";
 import { computeOutputs, isPerpetual, loadAndValidateBinding } from "./gen.ts";
+import { V2_DTS_PATH } from "./v2/emit-v2-dts.ts";
+import { V2_ENTITIES_PATH } from "./v2/emit-v2-entities.ts";
+import { V2_API_MARKER, V2_SPEC_PATH } from "./v2/emit-v2-spec.ts";
 import { buildApiReference, stitch } from "./emit-spec.ts";
 import { BINDING_MAPPINGS } from "./mappings.ts";
 import { surfacePaths, validateBinding } from "./validate.ts";
@@ -105,8 +108,19 @@ Deno.test("perpetual vs bootstrap classification", () => {
   assert.ok(isPerpetual(DTS_PATH));
   assert.ok(isPerpetual("docs/spec/v1-api.md"));
   assert.ok(isPerpetual("src/ts/gen/types.ts"));
+  assert.ok(isPerpetual(V2_DTS_PATH));
+  assert.ok(isPerpetual(V2_ENTITIES_PATH));
+  assert.ok(isPerpetual(V2_SPEC_PATH));
   assert.ok(!isPerpetual("src/ts/index.ts"));
   assert.ok(!isPerpetual("src/ts/pokemon.ts"));
+});
+
+Deno.test("v2 artifacts carry the projected surface (slice 3)", () => {
+  const entities = outputs.get(V2_ENTITIES_PATH)!;
+  assert.ok(entities.includes("export interface PK9 extends PKM"), "format entity missing");
+  const spec = outputs.get(V2_SPEC_PATH)!;
+  assert.ok(spec.includes("## v2 projected surface"), "chapter header missing");
+  assert.ok(!spec.includes(V2_API_MARKER), "marker must be replaced by the chapter");
 });
 
 Deno.test("MoveInfo carries only Core-tracked fields — no power/accuracy (owner adjudication on #19)", () => {

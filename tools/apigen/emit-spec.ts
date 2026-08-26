@@ -138,15 +138,24 @@ export function buildApiReference(bindingRows?: readonly BindingRow[]): string {
 
 /** Splice the generated chapter into whichever section carries the marker. */
 export function stitch(sections: readonly string[], chapter: string): string {
+  return stitchWith(API_REFERENCE_MARKER, sections, chapter);
+}
+
+/** `stitch` against an explicit marker — one per generated chapter. */
+export function stitchWith(
+  marker: string,
+  sections: readonly string[],
+  chapter: string,
+): string {
   let replaced = false;
   const out = sections.map((s) => {
-    if (!s.includes(API_REFERENCE_MARKER)) return s;
+    if (!s.includes(marker)) return s;
     replaced = true;
-    return s.replace(API_REFERENCE_MARKER, chapter.trimEnd());
+    return s.replace(marker, chapter.trimEnd());
   });
   if (!replaced) {
     throw new Error(
-      `no section carries ${API_REFERENCE_MARKER} — cannot place generated API reference`,
+      `no section carries ${marker} — cannot place generated API reference`,
     );
   }
   return out.join("\n");

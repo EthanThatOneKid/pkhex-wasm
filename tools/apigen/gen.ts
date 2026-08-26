@@ -15,6 +15,9 @@ import { BINDING_MAPPINGS } from "./mappings.ts";
 import { surfacePaths, validateBinding } from "./validate.ts";
 import type { RuntimeMetaLike } from "./model-types.ts";
 import { emitV2Dts, V2_DTS_PATH } from "./v2/emit-v2-dts.ts";
+import { emitV2Entities, V2_ENTITIES_PATH } from "./v2/emit-v2-entities.ts";
+import { buildV2ApiReference, V2_API_MARKER, V2_SPEC_PATH } from "./v2/emit-v2-spec.ts";
+import { stitchWith } from "./emit-spec.ts";
 import type { CoreMetaLike } from "./v2/meta-types.ts";
 
 const ROOT_URL = new URL("../../", import.meta.url);
@@ -72,14 +75,22 @@ export function computeOutputs(): Map<string, string> {
   const v2Meta = JSON.parse(
     Deno.readTextFileSync(fromFileUrl(new URL(V2_META_PATH, ROOT_URL))),
   ) as CoreMetaLike;
-  const v2 = emitV2Dts(v2Meta);
-  out.set(v2.path, v2.content);
+  const dts = emitV2Dts(v2Meta);
+  out.set(dts.path, dts.content);
+  const entities = emitV2Entities(v2Meta);
+  out.set(entities.path, entities.content);
+  out.set(
+    V2_SPEC_PATH,
+    stitchWith(V2_API_MARKER, loadSections(), buildV2ApiReference(v2Meta)),
+  );
   return out;
 }
 
 /** Files regenerated on every run — safe to overwrite unconditionally. */
 export function isPerpetual(path: string): boolean {
   return path === V2_DTS_PATH ||
+    path === V2_ENTITIES_PATH ||
+    path === V2_SPEC_PATH ||
     path === "tools/apigen/fixtures/pkhex-wasm.d.ts" ||
     path === "docs/spec/v1-api.md" ||
     path.startsWith("src/ts/gen/");
