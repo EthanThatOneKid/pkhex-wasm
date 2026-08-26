@@ -17,13 +17,17 @@ The [surface inventory](https://github.com/EthanThatOneKid/pkhex-wasm/blob/resea
 | `byte` `sbyte` `short` `ushort` `int` `uint` | `number` |
 | `long` `ulong` (true 64-bit, e.g. `Tracker`, `JunkData`) | `bigint` |
 | `float` `double` `decimal` | `number` |
-| `bool` / `string` | `boolean` / `string` |
+| `bool` / `string` / `char` | `boolean` / `string` / `string` |
 | `byte[]`, `Span<byte>`, `ReadOnlySpan<byte>`, `Memory<byte>` | `Uint8Array` (copied at the boundary) |
 | Non-byte spans and arrays (`ReadOnlySpan<ushort>`, `ushort[]`, `int[]`, `bool[]`) | readonly snapshots of the mapped element type |
 | Reference collections (`IList<T>`, `IReadOnlyList<T>` of class types) | readonly array snapshots of projected views |
+| Delegates (`Func<A, B, R>`, `Action<A>`, `Predicate<T>`) | call signatures with positional args (`(arg0: A', arg1: B') => R'`; `Predicate` ends `=> boolean`) |
+| `ValueTuple<A, B>` | `readonly [A', B']` |
 | `DateOnly?` / `TimeOnly?` | ISO strings (`"2023-04-05"`, `"HH:mm:ss"`) or `null` |
 | C# enums | generated string-literal unions; name↔value tables live in the metadata (see below) |
 | Nullable references `T?` | `T \| null` (never `undefined`) |
+
+Types outside the scanned class set (helper interfaces like `ITrainerInfo`, generic bases like `SaveBlock<T>`, generic parameters like `TItem`) pass through under their own names and resolve via a deterministic trailing stub section (`export type X = unknown;`) until the projection scope widens to declare them. Unknown generic shapes keep their outer name but recurse-map their arguments, so primitives inside them project instead of leaking raw C# spellings.
 
 **String encodings.** Projected members expose JS `string`; Core's per-generation encodings (Gen1/2 single-byte tables, Gen3–5 UTF-16 variant tables, Gen6+ Unicode) stay an internal concern of the wasm side. Raw trash-byte access projects as a sibling `Uint8Array` field where Core exposes it — string get/set plus trash bytes, never raw-only.
 

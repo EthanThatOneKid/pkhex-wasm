@@ -129,3 +129,21 @@ Deno.test("shortEnumLookup adapts FQN-keyed metadata to member type strings", ()
   assert.deepEqual(Object.keys(lookup).sort(), ["InventoryType", "Nature"]);
   assert.equal(projectType("Nature", lookup), '"Hardy" | "Lonely"');
 });
+
+Deno.test("char and CLR-spelled primitives map to their TS analogues", () => {
+  assert.equal(projectType("char"), "string");
+  assert.equal(projectType("Decimal"), "number");
+  assert.equal(projectType("Char"), "string");
+});
+
+Deno.test("delegates become call signatures with positional args", () => {
+  assert.equal(projectType("Func<InventoryItem, int, bool>"), "(arg0: InventoryItem, arg1: number) => boolean");
+  assert.equal(projectType("Action<PKM>"), "(arg0: PKM) => void");
+  assert.equal(projectType("Predicate<string>"), "(arg0: string) => boolean");
+  assert.equal(projectType("Func<int>"), "() => number");
+});
+
+Deno.test("tuples and unknown generics project their arguments", () => {
+  assert.equal(projectType("ValueTuple<byte, byte>"), "readonly [number, number]");
+  assert.equal(projectType("IEquatable<byte>"), "IEquatable<number>");
+});

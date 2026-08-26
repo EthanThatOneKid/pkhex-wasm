@@ -14,6 +14,8 @@ import { buildApiReference, stitch, type BindingRow } from "./emit-spec.ts";
 import { BINDING_MAPPINGS } from "./mappings.ts";
 import { surfacePaths, validateBinding } from "./validate.ts";
 import type { RuntimeMetaLike } from "./model-types.ts";
+import { emitV2Dts, V2_DTS_PATH } from "./v2/emit-v2-dts.ts";
+import type { CoreMetaLike } from "./v2/meta-types.ts";
 
 const ROOT_URL = new URL("../../", import.meta.url);
 const ROOT = fromFileUrl(ROOT_URL);
@@ -36,6 +38,7 @@ function loadSections(): string[] {
 }
 
 const META_PATH = "tools/apigen/runtime-meta.json";
+const V2_META_PATH = "tools/apigen/runtime-meta-v2.json";
 
 /** Inverted drift gate: the runtime export set and the mapping table must agree. */
 export function loadAndValidateBinding(): BindingRow[] {
@@ -66,12 +69,18 @@ export function computeOutputs(): Map<string, string> {
 `,
   );
   out.set("docs/spec/v1-api.md", spec);
+  const v2Meta = JSON.parse(
+    Deno.readTextFileSync(fromFileUrl(new URL(V2_META_PATH, ROOT_URL))),
+  ) as CoreMetaLike;
+  const v2 = emitV2Dts(v2Meta);
+  out.set(v2.path, v2.content);
   return out;
 }
 
 /** Files regenerated on every run — safe to overwrite unconditionally. */
 export function isPerpetual(path: string): boolean {
-  return path === "tools/apigen/fixtures/pkhex-wasm.d.ts" ||
+  return path === V2_DTS_PATH ||
+    path === "tools/apigen/fixtures/pkhex-wasm.d.ts" ||
     path === "docs/spec/v1-api.md" ||
     path.startsWith("src/ts/gen/");
 }

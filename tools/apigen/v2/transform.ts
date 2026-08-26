@@ -99,6 +99,14 @@ const PRIMITIVES: Record<string, string> = {
   decimal: "number",
   bool: "boolean",
   string: "string",
+  char: "string",
+  // The formatter occasionally surfaces CLR spellings inside generics
+  // ("List<Decimal>"); map those spellings too.
+  Decimal: "number",
+  Char: "string",
+  Boolean: "boolean",
+  Int32: "number",
+  Int64: "bigint",
   // System date-only/time-only values project as ISO strings (ADR 0001).
   DateOnly: "string",
   TimeOnly: "string",
@@ -140,14 +148,70 @@ export function projectType(
     return `readonly ${wrapIfUnion(projectType(collection[2], enums))}[]`;
   }
 
+  // Delegates become their call signatures; Func's last argument is the
+  // result ("Func<InventoryItem, int, bool>" -> "(arg0: InventoryItem,
+  // arg1: number) => boolean").
+  const delegate = /^(Func|Action|Predicate)<(.+)>$/.exec(csType);
+  if (delegate) {
+    const args = splitTopLevel(delegate[2]).map((a) => projectType(a, enums));
+    const kind = delegate[1];
+    if (kind === "Predicate") return `(${argList(args)}) => boolean`;
+    if (kind === "Action") return `(${argList(args)}) => void`;
+    const params = args.slice(0, -1);
+    return `(${argList(params)}) => ${args[args.length - 1]}`;
+  }
+
+  const nullableGeneric = /^Nullable<(.+)>$/.exec(csType);
+  if (nullableGeneric) {
+    return `${projectType(nullableGeneric[1], enums)} | null`;
+  }
+
+  // C# tuples project as TS tuples ("ValueTuple<byte, byte>" ->
+  // "readonly [number, number]").
+  const valueTuple = /^ValueTuple<(.+)>$/.exec(csType);
+  if (valueTuple) {
+    return `readonly [${splitTopLevel(valueTuple[1]).map((a) => projectType(a, enums)).join(", ")}]`;
+  }
+
   const enumValues = enums?.[csType];
   if (enumValues) {
     return enumValues.map((name) => `"${name}"`).join(" | ");
   }
 
+  // Unknown generic shapes keep their outer name but recurse-map their
+  // arguments, so primitives inside them project instead of leaking raw
+  // C# spellings ("IEquatable<byte>" -> "IEquatable<number>").
+  const generic = /^([A-Za-z_][\w.]*)<(.+)>$/.exec(csType);
+  if (generic) {
+    return `${generic[1]}<${splitTopLevel(generic[2]).map((a) => projectType(a, enums)).join(", ")}>`;
+  }
+
   // Named references (classes, interfaces, structs like PersonalInfo) pass
   // through verbatim; their declarations are projected alongside.
   return csType;
+}
+
+/** Splits a generic argument list on top-level commas only. */
+function splitTopLevel(list: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (const ch of list) {
+    if (ch === "<") depth++;
+    else if (ch === ">") depth--;
+    if (ch === "," && depth === 0) {
+      parts.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) parts.push(current.trim());
+  return parts;
+}
+
+function argList(types: string[]): string {
+  return types.map((t, i) => `arg${i}: ${t}`).join(", ");
 }
 
 /** Unions need parens when they become an array's element type. */

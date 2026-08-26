@@ -107,6 +107,11 @@ public sealed class CoreScanTests
 
         Assert.Equal("DateOnly?", byName["MetDate"].CsType);
 
+        // Method parameters are part of the raw facts the emitter needs.
+        var setIvs = pkm.Members.First(m => m.CsName == "SetIVs");
+        var param = Assert.Single(setIvs.Params);
+        Assert.Equal("ReadOnlySpan<int>", param.CsType);
+
         // u64 fields live where Core declares them: Tracker on the Gen8 base,
         // JunkData on the Gen5 format (surface inventory §1/§2)
         Assert.Equal("ulong", Meta.Classes[$"{CoreNs}.G8PKM"].Members.Single(m => m.CsName == "Tracker").CsType);
