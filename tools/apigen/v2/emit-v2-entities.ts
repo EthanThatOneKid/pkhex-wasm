@@ -13,6 +13,7 @@
 
 import {
   capFirst,
+  paramsText,
   projectCoreMeta,
   type ProjectedCoreModel,
 } from "./project.ts";
@@ -58,8 +59,7 @@ function renderEntities(model: ProjectedCoreModel): string {
       if (member.isStatic || member.shadowed) continue;
       if (member.docs) lines.push(`  /** ${member.docs} */`);
       if (member.kind === "method") {
-        const params = member.params.map((p) => `${p.name}: ${p.tsType}`).join(", ");
-        lines.push(`  ${member.tsName}(${params}): ${member.tsType};`);
+        lines.push(`  ${member.tsName}(${paramsText(member)}): ${member.tsType};`);
       } else {
         lines.push(`  readonly ${member.tsName}: ${member.tsType};`);
         if (member.setter) {

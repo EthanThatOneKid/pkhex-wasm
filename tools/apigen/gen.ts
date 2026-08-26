@@ -8,7 +8,7 @@
  */
 
 import { TYPES } from "./model.ts";
-import { emitDts } from "./emit-dts.ts";
+import { emitDts, DTS_PATH } from "./emit-dts.ts";
 import { emitSkeletonAll } from "./emit-skeleton.ts";
 import { buildApiReference, stitch, type BindingRow } from "./emit-spec.ts";
 import { BINDING_MAPPINGS } from "./mappings.ts";
@@ -16,7 +16,7 @@ import { surfacePaths, validateBinding } from "./validate.ts";
 import type { RuntimeMetaLike } from "./model-types.ts";
 import { emitV2Dts, V2_DTS_PATH } from "./v2/emit-v2-dts.ts";
 import { emitV2Entities, V2_ENTITIES_PATH } from "./v2/emit-v2-entities.ts";
-import { buildV2ApiReference, V2_API_MARKER, V2_SPEC_PATH } from "./v2/emit-v2-spec.ts";
+import { buildV2ApiReference, V2_API_MARKER, V2_SECTION_PATH, V2_SPEC_PATH } from "./v2/emit-v2-spec.ts";
 import { stitchWith } from "./emit-spec.ts";
 import type { CoreMetaLike } from "./v2/meta-types.ts";
 
@@ -30,8 +30,9 @@ function fromFileUrl(url: URL): string {
 }
 
 function loadSections(): string[] {
+  const v2Section = V2_SECTION_PATH.split("/").pop()!;
   const files = [...Deno.readDirSync(fromFileUrl(SECTIONS_DIR))]
-    .filter((f) => f.isFile && f.name.endsWith(".md"))
+    .filter((f) => f.isFile && f.name.endsWith(".md") && f.name !== v2Section)
     .map((f) => f.name)
     .sort();
   if (!files.length) throw new Error(`no sections found in ${SECTIONS_DIR}`);
@@ -81,7 +82,11 @@ export function computeOutputs(): Map<string, string> {
   out.set(entities.path, entities.content);
   out.set(
     V2_SPEC_PATH,
-    stitchWith(V2_API_MARKER, loadSections(), buildV2ApiReference(v2Meta)),
+    stitchWith(
+      V2_API_MARKER,
+      [Deno.readTextFileSync(fromFileUrl(new URL(V2_SECTION_PATH, ROOT_URL)))],
+      buildV2ApiReference(v2Meta),
+    ),
   );
   return out;
 }
@@ -91,7 +96,7 @@ export function isPerpetual(path: string): boolean {
   return path === V2_DTS_PATH ||
     path === V2_ENTITIES_PATH ||
     path === V2_SPEC_PATH ||
-    path === "tools/apigen/fixtures/pkhex-wasm.d.ts" ||
+    path === DTS_PATH ||
     path === "docs/spec/v1-api.md" ||
     path.startsWith("src/ts/gen/");
 }

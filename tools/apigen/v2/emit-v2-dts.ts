@@ -13,6 +13,7 @@
 import {
   capFirst,
   nsName,
+  paramsText,
   projectCoreMeta,
   type ProjectedClass,
   type ProjectedCoreModel,
@@ -130,9 +131,8 @@ function renderMember(lines: string[], member: ProjectedMember, ns: boolean): vo
     lines.push(`/** ${member.docs} */`);
   }
   if (member.kind === "method") {
-    const params = member.params.map((p) => `${p.name}: ${p.tsType}`).join(", ");
     // Ambient namespaces require explicit declaration keywords.
-    lines.push(`${ns ? "function " : ""}${name}(${params}): ${member.tsType};`);
+    lines.push(`${ns ? "function " : ""}${name}(${paramsText(member)}): ${member.tsType};`);
   } else if (!member.setter) {
     lines.push(`${ns ? "const" : "readonly"} ${name}: ${member.tsType};`);
   } else {

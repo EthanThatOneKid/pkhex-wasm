@@ -18,10 +18,12 @@ export interface ProjectedMember {
   tsName: string;
   kind: "property" | "method";
   /**
-   * False for methods and get/computed members (read-only); true means the
-   * renderer also emits the mechanical `setX(value): void` companion.
+   * False for methods and get/computed members; true means the renderer also
+   * emits the mechanical `setX(value): void` companion.
    */
   setter: boolean;
+  /** Raw reflector fact — distinguishes computed members from plain get-only. */
+  computed: boolean;
   /** Mapped field type, or the method's return type. */
   tsType: string;
   params: ProjectedParam[];
@@ -29,6 +31,11 @@ export interface ProjectedMember {
   isStatic: boolean;
   /** Suppressed from output because a projected ancestor declares it too. */
   shadowed: boolean;
+}
+
+/** Rendered parameter list shared by every renderer. */
+export function paramsText(m: ProjectedMember): string {
+  return m.params.map((p) => `${p.name}: ${p.tsType}`).join(", ");
 }
 
 export interface ProjectedClass {
@@ -193,6 +200,7 @@ export function projectCoreMeta(meta: CoreMetaLike): ProjectedCoreModel {
         tsName,
         kind: isMethod ? "method" : "property",
         setter: !isMethod && !member.computed && member.access !== "get",
+        computed: member.computed,
         tsType,
         params,
         docs: member.docs ?? null,

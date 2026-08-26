@@ -155,7 +155,7 @@ export function stitchWith(
   });
   if (!replaced) {
     throw new Error(
-      `no section carries ${marker} — cannot place generated API reference`,
+      `no section carries ${marker} — cannot place generated chapter`,
     );
   }
   return out.join("\n");

@@ -7,11 +7,22 @@
  * docs stay generated, never hand-edited.
  */
 
-import { projectCoreMeta, nsName, type ProjectedClass, type ProjectedCoreModel, type ProjectedMember } from "./project.ts";
+import {
+  capFirst,
+  nsName,
+  paramsText,
+  projectCoreMeta,
+  type ProjectedClass,
+  type ProjectedCoreModel,
+  type ProjectedMember,
+} from "./project.ts";
 import type { CoreMetaLike } from "./meta-types.ts";
 
 export const V2_API_MARKER = "<!-- apigen:v2-api-reference -->";
 export const V2_SPEC_PATH = "docs/spec/v2-api.md";
+/** Template the v2 chapter splices into — deliberately not part of the shared
+ * sections pool, so v1 and v2 docs never ingest each other's markers. */
+export const V2_SECTION_PATH = "tools/apigen/sections/45-v2-api-reference.md";
 
 function esc(s: string): string {
   return s.replace(/\|/g, "\\|");
@@ -20,14 +31,15 @@ function esc(s: string): string {
 function memberRow(m: ProjectedMember, ns: boolean): string {
   const name = ns ? nsName(m.tsName) : m.tsName;
   if (m.kind === "method") {
-    const params = m.params.map((p) => `${p.name}: ${p.tsType}`).join(", ");
-    return `| \`${name}(${params})\` | \`${esc(m.tsType)}\` | ${m.docs ?? ""} |`;
+    return `| \`${name}(${paramsText(m)})\` | \`${esc(m.tsType)}\` | ${m.docs ?? ""} |`;
   }
-  const setter = m.setter ? " get/set via `set" + caps(m.tsName) + "()`" : " readonly (computed)";
-  return `| \`${name}\` | \`${esc(m.tsType)}\` |${setter}${m.docs ? " — " + m.docs : ""} |`;
+  const note = m.computed
+    ? " readonly (computed)"
+    : m.setter
+    ? " get/set via `set" + capFirst(m.tsName) + "()`"
+    : " get-only";
+  return `| \`${name}\` | \`${esc(m.tsType)}\` |${note}${m.docs ? " — " + m.docs : ""} |`;
 }
-
-const caps = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 function renderClass(cls: ProjectedClass): string[] {
   const lines: string[] = [];
@@ -60,8 +72,8 @@ export function buildV2ApiReference(meta: CoreMetaLike): string {
   lines.push("## v2 projected surface", "");
   lines.push(
     "> Generated from `runtime-meta-v2.json` — run `deno task gen`; never edit by hand.",
-    "> Mirrors [`tools/apigen/fixtures/pkhex-wasm-v2.d.ts`](../../tools/apigen/fixtures/pkhex-wasm-v2.d.ts)",
-    "> and `src/ts/gen/v2/entities.ts`; all three render from one projection.",
+    "> Renders from the same projection as [`tools/apigen/fixtures/pkhex-wasm-v2.d.ts`](../../tools/apigen/fixtures/pkhex-wasm-v2.d.ts)",
+    "> and `src/ts/gen/v2/entities.ts`; all three come from one `projectCoreMeta` pass.",
     "",
   );
   lines.push(

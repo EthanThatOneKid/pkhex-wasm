@@ -1,88 +1,3 @@
-# pkhex-wasm v1 JavaScript API Specification
-
-**Status: Locked · 2026-08-22** — the destination artifact of the [wayfinder map](https://github.com/EthanThatOneKid/pkhex-wasm/issues/1). An implementation session builds v1 from this document without re-deciding anything.
-
-Normative decision tickets: [hosting](https://github.com/EthanThatOneKid/pkhex-wasm/issues/6) · [API surface](https://github.com/EthanThatOneKid/pkhex-wasm/issues/7) · [crypto strategy](https://github.com/EthanThatOneKid/pkhex-wasm/issues/8) · [byte transport](https://github.com/EthanThatOneKid/pkhex-wasm/issues/9) · [generation matrix](https://github.com/EthanThatOneKid/pkhex-wasm/issues/10) · [testing & packaging gates](https://github.com/EthanThatOneKid/pkhex-wasm/issues/11) · [docs pipeline](https://github.com/EthanThatOneKid/pkhex-wasm/issues/12).
-
-Vocabulary follows [`CONTEXT.md`](../../CONTEXT.md): **Handle**, **Binding**, **Lookup table**, **Edit tier**, **Read-only tier**, **Managed crypto**.
-
-This document is partly generated. The [public surface](#public-surface) chapter and the canonical declaration file are emitted from `tools/apigen/model.ts`:
-
-```bash
-deno task gen          # regenerate outputs
-deno task gen:check    # CI drift gate — fails when outputs lag the model
-```
-
-Never hand-edit generated content; change the model or a section source and regenerate.
-
-## Architecture
-
-Locked by the [hosting verdict](https://github.com/EthanThatOneKid/pkhex-wasm/issues/6) and validated end-to-end by the [spike](../../spike/):
-
-- **Wasm host**: bare Mono-wasm (`wasmbrowser` workload). No Blazor anywhere.
-- **Binding**: `[JSExport]`-annotated C# surface; JavaScript talks to managed objects directly. The JS-facing model mirrors `PKHeX.Facade`'s object model — entity Handles bound to Core structures, not a reimplementation.
-- **Managed crypto**: vendored pure-C# MD5/AES implementations registered into `RuntimeCryptographyProvider` during init; no JavaScript crypto involvement anywhere (see [Crypto requirements](#crypto-requirements)).
-- **Transport**: copy-in/copy-out typed arrays across the boundary (see [Data contracts](#data-contracts)).
-- **Lifecycle**: GC-reliant on both sides. No `dispose()`, no manual memory management for consumers.
-
-The spike measured ~5.9–6.0 MB gzipped transferred to interactive with PKHeX.Core trimmed into the bundle; that is the packaging budget baseline (see [Packaging & release](#packaging--release)).
-
-## Bootstrap lifecycle
-
-Exactly one asynchronous step exists in the entire API: `initPKHex()`.
-
-1. Fetch and instantiate the `_framework` runtime assets (`options.wasmBaseUrl` overrides the location; default is the package's own bundled runtime directory).
-2. Register Managed crypto providers onto `RuntimeCryptographyProvider.Aes` / `.Md5` — strictly **before** any save can be parsed, so BDSP/Gen 7/HOME seams work transparently the first time they are reached.
-3. Hydrate the global Lookup tables (species, natures, moves) and prepare per-game table loading.
-4. Return the synchronous root.
-
-Every operation on the returned root is synchronous. There is deliberately no second async boundary, no lazy per-generation loading, no worker requirement.
-
-## Data contracts
-
-Locked by [byte transport](https://github.com/EthanThatOneKid/pkhex-wasm/issues/9) and the [API surface](https://github.com/EthanThatOneKid/pkhex-wasm/issues/7):
-
-- **Copy-in**: `load(bytes)` defensively copies at the boundary. The consumer's buffer remains fully theirs afterwards; mutating it never affects a loaded game.
-- **Copy-out**: every `saveBytes(game)` returns a brand-new `Uint8Array`. Nothing aliases prior exports.
-- **No dirty tracking**: re-exporting an unmodified save costs one memcpy; Facade's edited flag stays informational only.
-- **Single-buffer input**: v1 accepts exactly one complete logical buffer — the same contract as upstream `SaveUtil.GetSaveFile`. Ceiling: the largest accepted buffer ≈ **4,436,719 bytes (~4.4 MB)** (SV DLC range bounds + deltas + tolerance).
-- **Switch-era multi-file assembly is consumer-side for v1**: main/backup/poke_trade file trios must be merged by the caller before `load`. A convenience assembler is a candidate post-v1 addition.
-- **Snapshot vs write-through**: `game.box(i)` / `game.party()` return snapshots of Handles; reads through Handles hit live Core state immediately; mutator calls write through instantly and are visible to the next export.
-- **GC lifecycle**: no `dispose()`, no handles to close. Consumers drop references; the runtimes collect.
-- **Memory profile**: peak footprint ≈ the copied-in save buffer (≤ ~4.4 MB) plus Core's parsed representation of it; entity Handles reference live managed objects, so a held `Pokemon` keeps its save's graph reachable. Dropping all JS references to the root and its Handles makes everything collectable on both sides. No streaming, no chunking, no manual pressure valves in v1.
-
-## Generation support
-
-Locked by [Choose supported save-generation matrix for v1](https://github.com/EthanThatOneKid/pkhex-wasm/issues/10), backed by an empirical probe across all 13 constructible formats:
-
-| Tier | Generations |
-| --- | --- |
-| Edit (all seven mutators apply) | Gen 3, 4, 5, 6, 7, SwSh, BDSP, SV, Legends Z-A |
-| Read-only (mutators throw descriptive errors) | Gen 1, 2, LGPE, PLA |
-
-The tier table above is the **consumer contract**. It was set from the empirical capability probe required by [#10](https://github.com/EthanThatOneKid/pkhex-wasm/issues/10), recorded here verbatim as evidence (Core-level behavior, not API promises):
-
-| Format | nickname | level | moves | nature | shiny on/off | IVs | EVs |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Gen 1–2 | ✓ (GB charset caps: 5 JP / 10 EN) | ✓ | ✓ | ✗ concept absent (no-op) | on ✓ via DV-poke; unset has upstream infinite-loop hazard | clamp @15, SPC aliased | legacy u16 scale |
-| Gen 3–7 mainline | ✓ | ✓ | ✓ | ✓ (PID-routed) | ✓✓ | full 31 | standard caps |
-| LGPE | ✓ | ✓ | ✓ | ✓ | ✓✓ | full | writable but gameplay-meaningless (Awakened system) |
-| SwSh / PLA / BDSP / SV / Z-A | ✓ | ✓ | ✓ | no-op via naïve path (mints/stat-alignment) | ✓✓ | full | standard (PLA uses Ganbaru levels) |
-
-Hard requirements surfaced by verification:
-
-- **`setNature` must be mint-aware.** The naïve `CommonEdits.SetNature` silently no-ops on every Gen 8+ format (natures derive through mints/stat-alignment there). v1 writes nature via the Facade `Natures.ChangeAll` path exclusively.
-- **Natures read as `null` before Gen 3** — the concept does not exist.
-- **GB quirks** (Gen 1–2): nickname caps at 5 chars JP / 10 EN with restricted charsets; IVs cap at 15 with special-defense aliasing special; EVs use the legacy scale; shiny is DV-derived — enabling works via a DV pattern, unsetting is unsupported in v1 (upstream's unset path has an infinite-loop hazard on GB formats).
-- **LGPE/PLA**: EV fields are writable but gameplay-meaningless (Awakened / Ganbaru systems) — one reason both sit in the read-only tier.
-- **Capability surfacing**: descriptive `Error`s plus this documented matrix. No capability flags on entities in v1; introspection can be added later without breaking anyone.
-- **Lookup tables at launch**: universal species/natures/moves as global statics; per-game items for *every* loadable generation (read-tier users still want item names). The `types` and `locations` tables sketched in [#7](https://github.com/EthanThatOneKid/pkhex-wasm/issues/7) are deferred beyond v1 — the launch list is [#10](https://github.com/EthanThatOneKid/pkhex-wasm/issues/10)'s decision.
-- **Deferred, re-evaluated after v1 (no promised date)**: Gen 1–2 editing; LGPE/PLA stat editing. All mutators — including `setShiny` — throw on read-only tiers; there are no partial exceptions.
-
-The chapter below is generated from `tools/apigen/model.ts` by `deno task gen`. It is normative; edit the model, not this text.
-
-<!-- apigen:api-reference -->
-
 # v2 API reference
 
 The chapter below is generated from `runtime-meta-v2.json` by `deno task gen`, alongside the v2 declarations and entity module (ticket #35). It is normative; edit the projection, not this text. This surface coexists with the v1 chapters until the hard-replace cut retires them.
@@ -90,8 +5,8 @@ The chapter below is generated from `runtime-meta-v2.json` by `deno task gen`, a
 ## v2 projected surface
 
 > Generated from `runtime-meta-v2.json` — run `deno task gen`; never edit by hand.
-> Mirrors [`tools/apigen/fixtures/pkhex-wasm-v2.d.ts`](../../tools/apigen/fixtures/pkhex-wasm-v2.d.ts)
-> and `src/ts/gen/v2/entities.ts`; all three render from one projection.
+> Renders from the same projection as [`tools/apigen/fixtures/pkhex-wasm-v2.d.ts`](../../tools/apigen/fixtures/pkhex-wasm-v2.d.ts)
+> and `src/ts/gen/v2/entities.ts`; all three come from one `projectCoreMeta` pass.
 
 `113` classes · `6805` members (`3593` ancestor-shadowed, suppressed) · `35` enums.
 
@@ -275,7 +190,7 @@ The chapter below is generated from `runtime-meta-v2.json` by `deno task gen`, a
 | `getBoxName(box: number)` | `string` |  |
 | `getBoxNameOffset(box: number)` | `number` |  |
 | `getGroupName(group: number)` | `string` |  |
-| `uid` | `bigint` | readonly (computed) |
+| `uid` | `bigint` | get-only |
 
 Static members:
 
@@ -289,7 +204,7 @@ Static members:
 
 | Member | Type | Description |
 | --- | --- | --- |
-| `isBigEndian` | `boolean` | readonly (computed) |
+| `isBigEndian` | `boolean` | get-only |
 
 ### `CK3`
 
@@ -302,9 +217,9 @@ Static members:
 | `expShadow` | `number` | get/set via `setExpShadow()` |
 | `forceCorrectFatefulState(japanese: boolean, value: boolean)` | `void` |  |
 | `isFatefulValid(japanese: boolean)` | `boolean` |  |
-| `isShadow` | `boolean` | readonly (computed) |
+| `isShadow` | `boolean` | get-only |
 | `nicknameDisplay` | `string` | get/set via `setNicknameDisplay()` |
-| `nicknameDisplayTrash` | `Uint8Array` | readonly (computed) |
+| `nicknameDisplayTrash` | `Uint8Array` | get-only |
 | `originalRegion` | `"NoRegion" \| "NTSC_J" \| "NTSC_U" \| "PAL"` | get/set via `setOriginalRegion()` |
 | `partySlot` | `number` | get/set via `setPartySlot()` |
 | `purification` | `number` | get/set via `setPurification()` |
@@ -408,9 +323,9 @@ Static members:
 | `metLocationdp` | `number` | get/set via `setMetLocationdp()` |
 | `metLocationExtended` | `number` | get/set via `setMetLocationExtended()` |
 | `pokerusState` | `number` | get/set via `setPokerusState()` |
-| `possiblyPalParkdp` | `boolean` | readonly (computed) |
-| `possiblyPalParkhgss` | `boolean` | readonly (computed) |
-| `possiblyPalParkPt` | `boolean` | readonly (computed) |
+| `possiblyPalParkdp` | `boolean` | get-only |
+| `possiblyPalParkhgss` | `boolean` | get-only |
+| `possiblyPalParkPt` | `boolean` | get-only |
 | `rib34` | `boolean` | get/set via `setRib34()` |
 | `rib35` | `boolean` | get/set via `setRib35()` |
 | `rib36` | `boolean` | get/set via `setRib36()` |
@@ -576,13 +491,13 @@ Static members:
 | `handlingTrainerMemoryVariable` | `number` | get/set via `setHandlingTrainerMemoryVariable()` |
 | `hasBattleMemoryRibbon` | `boolean` | get/set via `setHasBattleMemoryRibbon()` |
 | `hasContestMemoryRibbon` | `boolean` | get/set via `setHasContestMemoryRibbon()` |
-| `hasMarkEncounter8` | `boolean` | readonly (computed) |
-| `hasMarkEncounter9` | `boolean` | readonly (computed) |
+| `hasMarkEncounter8` | `boolean` | get-only |
+| `hasMarkEncounter9` | `boolean` | get-only |
 | `heightScalar` | `number` | get/set via `setHeightScalar()` |
 | `hyperTrainFlags` | `number` | get/set via `setHyperTrainFlags()` |
 | `iv32` | `number` | get/set via `setIv32()` |
 | `isFavorite` | `boolean` | get/set via `setIsFavorite()` |
-| `markCount` | `number` | readonly (computed) |
+| `markCount` | `number` | get-only |
 | `markingCircle` | `"None" \| "Blue" \| "Pink"` | get/set via `setMarkingCircle()` |
 | `markingCount` | `number` | readonly (computed) |
 | `markingDiamond` | `"None" \| "Blue" \| "Pink"` | get/set via `setMarkingDiamond()` |
@@ -596,8 +511,8 @@ Static members:
 | `originalTrainerMemoryIntensity` | `number` | get/set via `setOriginalTrainerMemoryIntensity()` |
 | `originalTrainerMemoryVariable` | `number` | get/set via `setOriginalTrainerMemoryVariable()` |
 | `palma` | `number` | get/set via `setPalma()` |
-| `permit` | `IPermitRecord` | readonly (computed) |
-| `pokeJob` | `Uint8Array` | readonly (computed) |
+| `permit` | `IPermitRecord` | get-only |
+| `pokeJob` | `Uint8Array` | get-only |
 | `pokerusState` | `number` | get/set via `setPokerusState()` |
 | `rib457` | `boolean` | get/set via `setRib457()` |
 | `rib460` | `boolean` | get/set via `setRib460()` |
@@ -616,7 +531,7 @@ Static members:
 | `rib475` | `boolean` | get/set via `setRib475()` |
 | `rib476` | `boolean` | get/set via `setRib476()` |
 | `rib477` | `boolean` | get/set via `setRib477()` |
-| `recordFlags` | `Uint8Array` | readonly (computed) |
+| `recordFlags` | `Uint8Array` | get-only |
 | `ribbonAlert` | `boolean` | get/set via `setRibbonAlert()` |
 | `ribbonArtist` | `boolean` | get/set via `setRibbonArtist()` |
 | `ribbonBattleRoyale` | `boolean` | get/set via `setRibbonBattleRoyale()` |
@@ -660,7 +575,7 @@ Static members:
 | `ribbonMarkCalmness` | `boolean` | get/set via `setRibbonMarkCalmness()` |
 | `ribbonMarkCharismatic` | `boolean` | get/set via `setRibbonMarkCharismatic()` |
 | `ribbonMarkCloudy` | `boolean` | get/set via `setRibbonMarkCloudy()` |
-| `ribbonMarkCount` | `number` | readonly (computed) |
+| `ribbonMarkCount` | `number` | get-only |
 | `ribbonMarkCrafty` | `boolean` | get/set via `setRibbonMarkCrafty()` |
 | `ribbonMarkCurry` | `boolean` | get/set via `setRibbonMarkCurry()` |
 | `ribbonMarkDawn` | `boolean` | get/set via `setRibbonMarkDawn()` |
@@ -782,7 +697,7 @@ Static members:
 
 | Member | Type | Description |
 | --- | --- | --- |
-| `daycareCount` | `number` | readonly (computed) |
+| `daycareCount` | `number` | get-only |
 
 ### `IDaycareRandomState<T>`
 
@@ -798,7 +713,7 @@ Static members:
 
 | Member | Type | Description |
 | --- | --- | --- |
-| `daycareSlotCount` | `number` | readonly (computed) |
+| `daycareSlotCount` | `number` | get-only |
 | `getDaycareSlot(index: number)` | `Uint8Array` |  |
 | `isDaycareOccupied(index: number)` | `boolean` |  |
 | `setDaycareOccupied(index: number, occupied: boolean)` | `void` |  |
@@ -811,7 +726,7 @@ Static members:
 | --- | --- | --- |
 | `canContain(itemID: number)` | `boolean` |  |
 | `clearCount0()` | `void` | Clears all item slots with a quantity of zero and shifts any subsequent item slot up. |
-| `count` | `number` | readonly (computed) — Count of item slots occupied in the pouch. |
+| `count` | `number` | get-only — Count of item slots occupied in the pouch. |
 | `findIndexFirstEmptySlot()` | `number` |  |
 | `getAllItems()` | `readonly number[]` |  |
 | `getEmpty(itemID: number, count: number)` | `InventoryItem` |  |
@@ -820,8 +735,8 @@ Static members:
 | `giveAllItems(bag: PlayerBag, newItems: readonly number[], count: number)` | `void` |  |
 | `giveItem(bag: PlayerBag, itemID: number, count: number)` | `number` |  |
 | `hasItem(itemID: number)` | `boolean` |  |
-| `isCramped` | `boolean` | readonly (computed) — Checks if the player may run out of bag space when there are too many unique items to fit into the pouch. |
-| `items` | `readonly InventoryItem[]` | readonly (computed) |
+| `isCramped` | `boolean` | get-only — Checks if the player may run out of bag space when there are too many unique items to fit into the pouch. |
+| `items` | `readonly InventoryItem[]` | get-only |
 | `maxCount` | `number` | get/set via `setMaxCount()` — Max quantity for a given item that can be stored in the pouch. |
 | `modifyAllCount(value: number, modifyCriteria: (arg0: InventoryItem, arg1: number) => boolean)` | `void` |  |
 | `modifyAllCount(bag: PlayerBag, count: number)` | `void` |  |
@@ -951,8 +866,8 @@ Static members:
 | `alphaMove` | `number` | get/set via `setAlphaMove()` |
 | `battleVersion` | `"Any" \| "S" \| "R" \| "E" \| "FR" \| "LG" \| "HG" \| "SS" \| "D" \| "P" \| "Pt" \| "CXD" \| "BATREV" \| "W" \| "B" \| "W2" \| "B2" \| "X" \| "Y" \| "AS" \| "OR" \| "SN" \| "MN" \| "US" \| "UM" \| "GO" \| "RD" \| "GN" \| "BU" \| "YW" \| "GD" \| "SI" \| "C" \| "GP" \| "GE" \| "SW" \| "SH" \| "PLA" \| "BD" \| "SP" \| "SL" \| "VL" \| "ZA" \| "CP" \| "RB" \| "RBY" \| "GS" \| "GSC" \| "RS" \| "RSE" \| "FRLG" \| "RSBOX" \| "COLO" \| "XD" \| "DP" \| "DPPt" \| "HGSS" \| "BW" \| "B2W2" \| "XY" \| "ORASDEMO" \| "ORAS" \| "SM" \| "USUM" \| "GG" \| "SWSH" \| "BDSP" \| "SV" \| "Gen1" \| "Gen2" \| "Gen3" \| "Gen4" \| "Gen5" \| "Gen6" \| "Gen7" \| "Gen7b" \| "Gen8" \| "Gen9" \| "StadiumJ" \| "Stadium" \| "Stadium2" \| "EFL" \| "Invalid"` | get/set via `setBattleVersion()` |
 | `belongsTo(tr: ITrainerInfo)` | `boolean` |  |
-| `calcHeightAbsolute` | `number` | readonly (computed) |
-| `calcWeightAbsolute` | `number` | readonly (computed) |
+| `calcHeightAbsolute` | `number` | get-only |
+| `calcWeightAbsolute` | `number` | get-only |
 | `canGigantamax` | `boolean` | get/set via `setCanGigantamax()` |
 | `checksum` | `number` | get/set via `setChecksum()` |
 | `clearMoveRecordFlags()` | `void` |  |
@@ -1002,17 +917,17 @@ Static members:
 | `handlingTrainerMemoryVariable` | `number` | get/set via `setHandlingTrainerMemoryVariable()` |
 | `hasBattleMemoryRibbon` | `boolean` | get/set via `setHasBattleMemoryRibbon()` |
 | `hasContestMemoryRibbon` | `boolean` | get/set via `setHasContestMemoryRibbon()` |
-| `hasMarkEncounter8` | `boolean` | readonly (computed) |
-| `hasMarkEncounter9` | `boolean` | readonly (computed) |
+| `hasMarkEncounter8` | `boolean` | get-only |
+| `hasMarkEncounter9` | `boolean` | get-only |
 | `heightAbsolute` | `number` | get/set via `setHeightAbsolute()` |
-| `heightRatio` | `number` | readonly (computed) |
+| `heightRatio` | `number` | get-only |
 | `heightScalar` | `number` | get/set via `setHeightScalar()` |
 | `hyperTrainFlags` | `number` | get/set via `setHyperTrainFlags()` |
 | `iv32` | `number` | get/set via `setIv32()` |
 | `isAlpha` | `boolean` | get/set via `setIsAlpha()` |
 | `isFavorite` | `boolean` | get/set via `setIsFavorite()` |
 | `isNoble` | `boolean` | get/set via `setIsNoble()` |
-| `markCount` | `number` | readonly (computed) |
+| `markCount` | `number` | get-only |
 | `markingCircle` | `"None" \| "Blue" \| "Pink"` | get/set via `setMarkingCircle()` |
 | `markingCount` | `number` | readonly (computed) |
 | `markingDiamond` | `"None" \| "Blue" \| "Pink"` | get/set via `setMarkingDiamond()` |
@@ -1021,15 +936,15 @@ Static members:
 | `markingStar` | `"None" \| "Blue" \| "Pink"` | get/set via `setMarkingStar()` |
 | `markingTriangle` | `"None" \| "Blue" \| "Pink"` | get/set via `setMarkingTriangle()` |
 | `markingValue` | `number` | get/set via `setMarkingValue()` |
-| `masteredRecord` | `Uint8Array` | readonly (computed) |
-| `moveRecordFlags` | `Uint8Array` | readonly (computed) |
+| `masteredRecord` | `Uint8Array` | get-only |
+| `moveRecordFlags` | `Uint8Array` | get-only |
 | `originalTrainerMemory` | `number` | get/set via `setOriginalTrainerMemory()` |
 | `originalTrainerMemoryFeeling` | `number` | get/set via `setOriginalTrainerMemoryFeeling()` |
 | `originalTrainerMemoryIntensity` | `number` | get/set via `setOriginalTrainerMemoryIntensity()` |
 | `originalTrainerMemoryVariable` | `number` | get/set via `setOriginalTrainerMemoryVariable()` |
-| `permit` | `IPermitRecord` | readonly (computed) |
+| `permit` | `IPermitRecord` | get-only |
 | `pokerusState` | `number` | get/set via `setPokerusState()` |
-| `purchasedRecord` | `Uint8Array` | readonly (computed) |
+| `purchasedRecord` | `Uint8Array` | get-only |
 | `rib457` | `boolean` | get/set via `setRib457()` |
 | `rib460` | `boolean` | get/set via `setRib460()` |
 | `rib461` | `boolean` | get/set via `setRib461()` |
@@ -1092,7 +1007,7 @@ Static members:
 | `ribbonMarkCalmness` | `boolean` | get/set via `setRibbonMarkCalmness()` |
 | `ribbonMarkCharismatic` | `boolean` | get/set via `setRibbonMarkCharismatic()` |
 | `ribbonMarkCloudy` | `boolean` | get/set via `setRibbonMarkCloudy()` |
-| `ribbonMarkCount` | `number` | readonly (computed) |
+| `ribbonMarkCount` | `number` | get-only |
 | `ribbonMarkCrafty` | `boolean` | get/set via `setRibbonMarkCrafty()` |
 | `ribbonMarkCurry` | `boolean` | get/set via `setRibbonMarkCurry()` |
 | `ribbonMarkDawn` | `boolean` | get/set via `setRibbonMarkDawn()` |
@@ -1177,7 +1092,7 @@ Static members:
 | `unkf3` | `number` | get/set via `setUnkf3()` |
 | `updateHandler(tr: ITrainerInfo)` | `void` |  |
 | `weightAbsolute` | `number` | get/set via `setWeightAbsolute()` |
-| `weightRatio` | `number` | readonly (computed) |
+| `weightRatio` | `number` | get-only |
 | `weightScalar` | `number` | get/set via `setWeightScalar()` |
 
 Static members:
@@ -1239,16 +1154,16 @@ Static members:
 | `handlingTrainerMemoryVariable` | `number` | get/set via `setHandlingTrainerMemoryVariable()` |
 | `hasBattleMemoryRibbon` | `boolean` | get/set via `setHasBattleMemoryRibbon()` |
 | `hasContestMemoryRibbon` | `boolean` | get/set via `setHasContestMemoryRibbon()` |
-| `hasMarkEncounter8` | `boolean` | readonly (computed) |
-| `hasMarkEncounter9` | `boolean` | readonly (computed) |
+| `hasMarkEncounter8` | `boolean` | get-only |
+| `hasMarkEncounter9` | `boolean` | get-only |
 | `heightScalar` | `number` | get/set via `setHeightScalar()` |
 | `hyperTrainFlags` | `number` | get/set via `setHyperTrainFlags()` |
 | `iv32` | `number` | get/set via `setIv32()` |
 | `isAlpha` | `boolean` | get/set via `setIsAlpha()` |
 | `isFavorite` | `boolean` | get/set via `setIsFavorite()` |
-| `isUnhatchedEgg` | `boolean` | readonly (computed) |
+| `isUnhatchedEgg` | `boolean` | get-only |
 | `levelBoost` | `number` | get/set via `setLevelBoost()` |
-| `markCount` | `number` | readonly (computed) |
+| `markCount` | `number` | get-only |
 | `markingCircle` | `"None" \| "Blue" \| "Pink"` | get/set via `setMarkingCircle()` |
 | `markingCount` | `number` | readonly (computed) |
 | `markingDiamond` | `"None" \| "Blue" \| "Pink"` | get/set via `setMarkingDiamond()` |
@@ -1262,9 +1177,9 @@ Static members:
 | `originalTrainerMemoryFeeling` | `number` | get/set via `setOriginalTrainerMemoryFeeling()` |
 | `originalTrainerMemoryIntensity` | `number` | get/set via `setOriginalTrainerMemoryIntensity()` |
 | `originalTrainerMemoryVariable` | `number` | get/set via `setOriginalTrainerMemoryVariable()` |
-| `permit` | `IPermitRecord` | readonly (computed) |
-| `plusFlags0` | `Uint8Array` | readonly (computed) |
-| `plusFlags1` | `Uint8Array` | readonly (computed) |
+| `permit` | `IPermitRecord` | get-only |
+| `plusFlags0` | `Uint8Array` | get-only |
+| `plusFlags1` | `Uint8Array` | get-only |
 | `pokerusState` | `number` | get/set via `setPokerusState()` |
 | `rib457` | `boolean` | get/set via `setRib457()` |
 | `rib460` | `boolean` | get/set via `setRib460()` |
@@ -1283,8 +1198,8 @@ Static members:
 | `rib475` | `boolean` | get/set via `setRib475()` |
 | `rib476` | `boolean` | get/set via `setRib476()` |
 | `rib477` | `boolean` | get/set via `setRib477()` |
-| `recordFlagsBase` | `Uint8Array` | readonly (computed) |
-| `recordFlagsdlc` | `Uint8Array` | readonly (computed) |
+| `recordFlagsBase` | `Uint8Array` | get-only |
+| `recordFlagsdlc` | `Uint8Array` | get-only |
 | `ribbonAlert` | `boolean` | get/set via `setRibbonAlert()` |
 | `ribbonArtist` | `boolean` | get/set via `setRibbonArtist()` |
 | `ribbonBattleRoyale` | `boolean` | get/set via `setRibbonBattleRoyale()` |
@@ -1328,7 +1243,7 @@ Static members:
 | `ribbonMarkCalmness` | `boolean` | get/set via `setRibbonMarkCalmness()` |
 | `ribbonMarkCharismatic` | `boolean` | get/set via `setRibbonMarkCharismatic()` |
 | `ribbonMarkCloudy` | `boolean` | get/set via `setRibbonMarkCloudy()` |
-| `ribbonMarkCount` | `number` | readonly (computed) |
+| `ribbonMarkCount` | `number` | get-only |
 | `ribbonMarkCrafty` | `boolean` | get/set via `setRibbonMarkCrafty()` |
 | `ribbonMarkCurry` | `boolean` | get/set via `setRibbonMarkCurry()` |
 | `ribbonMarkDawn` | `boolean` | get/set via `setRibbonMarkDawn()` |
@@ -1421,12 +1336,12 @@ Static members:
 | `avSpa` | `number` | get/set via `setAvSpa()` |
 | `avSpd` | `number` | get/set via `setAvSpd()` |
 | `avSpe` | `number` | get/set via `setAvSpe()` |
-| `awakecp` | `number` | readonly (computed) |
-| `basecp` | `number` | readonly (computed) |
-| `cpScalar` | `number` | readonly (computed) |
-| `calccp` | `number` | readonly (computed) |
-| `calcHeightAbsolute` | `number` | readonly (computed) |
-| `calcWeightAbsolute` | `number` | readonly (computed) |
+| `awakecp` | `number` | get-only |
+| `basecp` | `number` | get-only |
+| `cpScalar` | `number` | get-only |
+| `calccp` | `number` | get-only |
+| `calcHeightAbsolute` | `number` | get-only |
+| `calcWeightAbsolute` | `number` | get-only |
 | `dirtLocation` | `number` | get/set via `setDirtLocation()` |
 | `dirtType` | `number` | get/set via `setDirtType()` |
 | `enjoyment` | `number` | get/set via `setEnjoyment()` |
@@ -1450,11 +1365,11 @@ Static members:
 | `hasBattleMemoryRibbon` | `boolean` | get/set via `setHasBattleMemoryRibbon()` |
 | `hasContestMemoryRibbon` | `boolean` | get/set via `setHasContestMemoryRibbon()` |
 | `heightAbsolute` | `number` | get/set via `setHeightAbsolute()` |
-| `heightRatio` | `number` | readonly (computed) |
+| `heightRatio` | `number` | get-only |
 | `heightScalar` | `number` | get/set via `setHeightScalar()` |
 | `hyperTrainFlags` | `number` | get/set via `setHyperTrainFlags()` |
 | `isFavorite` | `boolean` | get/set via `setIsFavorite()` |
-| `isStarter` | `boolean` | readonly (computed) |
+| `isStarter` | `boolean` | get-only |
 | `markingCircle` | `"None" \| "Blue" \| "Pink"` | get/set via `setMarkingCircle()` |
 | `markingCount` | `number` | readonly (computed) |
 | `markingDiamond` | `"None" \| "Blue" \| "Pink"` | get/set via `setMarkingDiamond()` |
@@ -1543,7 +1458,7 @@ Static members:
 | `statMega` | `boolean` | get/set via `setStatMega()` |
 | `statMegaForm` | `number` | get/set via `setStatMegaForm()` |
 | `weightAbsolute` | `number` | get/set via `setWeightAbsolute()` |
-| `weightRatio` | `number` | readonly (computed) |
+| `weightRatio` | `number` | get-only |
 | `weightScalar` | `number` | get/set via `setWeightScalar()` |
 
 Static members:
@@ -1577,7 +1492,7 @@ Static members:
 | `catchRate` | `number` | get/set via `setCatchRate()` |
 | `convertTopk2()` | `PK2` |  |
 | `convertTopk7()` | `PK7` |  |
-| `gen2Item` | `number` | readonly (computed) |
+| `gen2Item` | `number` | get-only |
 | `getSingleListChecksum()` | `number` | Gets a checksum over all the entity's data using a single list to wrap all components. |
 | `setTypes(pi: T)` | `void` |  |
 | `speciesInternal` | `number` | get/set via `setSpeciesInternal()` |
@@ -1630,8 +1545,8 @@ Static members:
 | `convertTobk4()` | `BK4` |  |
 | `convertTopk5()` | `PK5` |  |
 | `convertTork4()` | `RK4` |  |
-| `heldMail` | `Uint8Array` | readonly (computed) |
-| `seals` | `Uint8Array` | readonly (computed) |
+| `heldMail` | `Uint8Array` | get-only |
+| `seals` | `Uint8Array` | get-only |
 
 Static members:
 
@@ -1656,7 +1571,7 @@ Static members:
 | `convertTopk6()` | `PK6` |  |
 | `getMarking(index: number)` | `boolean` |  |
 | `groundTile` | `"None" \| "Sand" \| "Grass" \| "Puddle" \| "Rock" \| "Cave" \| "Snow" \| "Water" \| "Ice" \| "Building" \| "Marsh" \| "Bridge" \| "Elite4_1" \| "Max_DP" \| "Elite4_2" \| "Elite4_3" \| "Elite4_4" \| "Elite4_M" \| "DistortionSideways" \| "BattleTower" \| "BattleFactory" \| "BattleArcade" \| "BattleCastle" \| "BattleHall" \| "Distortion" \| "Max_Pt"` | get/set via `setGroundTile()` |
-| `heldMail` | `Uint8Array` | readonly (computed) |
+| `heldMail` | `Uint8Array` | get-only |
 | `hiddenAbility` | `boolean` | get/set via `setHiddenAbility()` |
 | `iv32` | `number` | get/set via `setIv32()` |
 | `isPokeStar` | `boolean` | get/set via `setIsPokeStar()` |
@@ -1830,7 +1745,7 @@ Static members:
 | `handlingTrainerMemoryVariable` | `number` | get/set via `setHandlingTrainerMemoryVariable()` |
 | `hasBattleMemoryRibbon` | `boolean` | get/set via `setHasBattleMemoryRibbon()` |
 | `hasContestMemoryRibbon` | `boolean` | get/set via `setHasContestMemoryRibbon()` |
-| `isUntradedEvent6` | `boolean` | readonly (computed) |
+| `isUntradedEvent6` | `boolean` | get-only |
 | `markingCircle` | `boolean` | get/set via `setMarkingCircle()` |
 | `markingCount` | `number` | readonly (computed) |
 | `markingDiamond` | `boolean` | get/set via `setMarkingDiamond()` |
@@ -1992,7 +1907,7 @@ Static members:
 | `hasBattleMemoryRibbon` | `boolean` | get/set via `setHasBattleMemoryRibbon()` |
 | `hasContestMemoryRibbon` | `boolean` | get/set via `setHasContestMemoryRibbon()` |
 | `hyperTrainFlags` | `number` | get/set via `setHyperTrainFlags()` |
-| `isUntradedEvent6` | `boolean` | readonly (computed) |
+| `isUntradedEvent6` | `boolean` | get-only |
 | `markingCircle` | `"None" \| "Blue" \| "Pink"` | get/set via `setMarkingCircle()` |
 | `markingCount` | `number` | readonly (computed) |
 | `markingDiamond` | `"None" \| "Blue" \| "Pink"` | get/set via `setMarkingDiamond()` |
@@ -2112,7 +2027,7 @@ Static members:
 | `belongsTo(tr: ITrainerInfo)` | `boolean` |  |
 | `dynamaxType` | `number` | get/set via `setDynamaxType()` |
 | `fixMemories()` | `void` |  |
-| `isSideTransfer` | `boolean` | readonly (computed) |
+| `isSideTransfer` | `boolean` | get-only |
 | `updateHandler(tr: ITrainerInfo)` | `void` |  |
 
 ### `PK9`
@@ -2158,14 +2073,14 @@ Static members:
 | `handlingTrainerMemoryVariable` | `number` | get/set via `setHandlingTrainerMemoryVariable()` |
 | `hasBattleMemoryRibbon` | `boolean` | get/set via `setHasBattleMemoryRibbon()` |
 | `hasContestMemoryRibbon` | `boolean` | get/set via `setHasContestMemoryRibbon()` |
-| `hasMarkEncounter8` | `boolean` | readonly (computed) |
-| `hasMarkEncounter9` | `boolean` | readonly (computed) |
+| `hasMarkEncounter8` | `boolean` | get-only |
+| `hasMarkEncounter9` | `boolean` | get-only |
 | `heightScalar` | `number` | get/set via `setHeightScalar()` |
 | `hyperTrainFlags` | `number` | get/set via `setHyperTrainFlags()` |
 | `iv32` | `number` | get/set via `setIv32()` |
 | `isFavorite` | `boolean` | get/set via `setIsFavorite()` |
-| `isUnhatchedEgg` | `boolean` | readonly (computed) |
-| `markCount` | `number` | readonly (computed) |
+| `isUnhatchedEgg` | `boolean` | get-only |
+| `markCount` | `number` | get-only |
 | `markingCircle` | `"None" \| "Blue" \| "Pink"` | get/set via `setMarkingCircle()` |
 | `markingCount` | `number` | readonly (computed) |
 | `markingDiamond` | `"None" \| "Blue" \| "Pink"` | get/set via `setMarkingDiamond()` |
@@ -2179,7 +2094,7 @@ Static members:
 | `originalTrainerMemoryFeeling` | `number` | get/set via `setOriginalTrainerMemoryFeeling()` |
 | `originalTrainerMemoryIntensity` | `number` | get/set via `setOriginalTrainerMemoryIntensity()` |
 | `originalTrainerMemoryVariable` | `number` | get/set via `setOriginalTrainerMemoryVariable()` |
-| `permit` | `IPermitRecord` | readonly (computed) |
+| `permit` | `IPermitRecord` | get-only |
 | `pokerusState` | `number` | get/set via `setPokerusState()` |
 | `rib457` | `boolean` | get/set via `setRib457()` |
 | `rib460` | `boolean` | get/set via `setRib460()` |
@@ -2198,8 +2113,8 @@ Static members:
 | `rib475` | `boolean` | get/set via `setRib475()` |
 | `rib476` | `boolean` | get/set via `setRib476()` |
 | `rib477` | `boolean` | get/set via `setRib477()` |
-| `recordFlagsBase` | `Uint8Array` | readonly (computed) |
-| `recordFlagsdlc` | `Uint8Array` | readonly (computed) |
+| `recordFlagsBase` | `Uint8Array` | get-only |
+| `recordFlagsdlc` | `Uint8Array` | get-only |
 | `ribbonAlert` | `boolean` | get/set via `setRibbonAlert()` |
 | `ribbonArtist` | `boolean` | get/set via `setRibbonArtist()` |
 | `ribbonBattleRoyale` | `boolean` | get/set via `setRibbonBattleRoyale()` |
@@ -2243,7 +2158,7 @@ Static members:
 | `ribbonMarkCalmness` | `boolean` | get/set via `setRibbonMarkCalmness()` |
 | `ribbonMarkCharismatic` | `boolean` | get/set via `setRibbonMarkCharismatic()` |
 | `ribbonMarkCloudy` | `boolean` | get/set via `setRibbonMarkCloudy()` |
-| `ribbonMarkCount` | `number` | readonly (computed) |
+| `ribbonMarkCount` | `number` | get-only |
 | `ribbonMarkCrafty` | `boolean` | get/set via `setRibbonMarkCrafty()` |
 | `ribbonMarkCurry` | `boolean` | get/set via `setRibbonMarkCurry()` |
 | `ribbonMarkDawn` | `boolean` | get/set via `setRibbonMarkDawn()` |
@@ -2384,8 +2299,8 @@ Static members:
 | `heightScalar` | `number` | get/set via `setHeightScalar()` |
 | `hyperTrainFlags` | `number` | get/set via `setHyperTrainFlags()` |
 | `isBadEgg` | `boolean` | get/set via `setIsBadEgg()` |
-| `latestGameData` | `IGameDataSide` | readonly (computed) |
-| `markCount` | `number` | readonly (computed) |
+| `latestGameData` | `IGameDataSide` | get-only |
+| `markCount` | `number` | get-only |
 | `markingCircle` | `"None" \| "Blue" \| "Pink"` | get/set via `setMarkingCircle()` |
 | `markingCount` | `number` | readonly (computed) |
 | `markingDiamond` | `"None" \| "Blue" \| "Pink"` | get/set via `setMarkingDiamond()` |
@@ -2401,7 +2316,7 @@ Static members:
 | `rebuild(dest: Uint8Array)` | `number` |  |
 | `rebuild()` | `Uint8Array` |  |
 | `ribbonCount` | `number` | readonly (computed) |
-| `ribbonMarkCount` | `number` | readonly (computed) |
+| `ribbonMarkCount` | `number` | get-only |
 | `setMarking(index: number, value: "None" | "Blue" | "Pink")` | `void` |  |
 | `tracker` | `bigint` | get/set via `setTracker()` |
 | `weightScalar` | `number` | get/set via `setWeightScalar()` |
@@ -2420,27 +2335,27 @@ Static members:
 
 | Member | Type | Description |
 | --- | --- | --- |
-| `ao` | `boolean` | readonly (computed) |
+| `ao` | `boolean` | get-only |
 | `ability` | `number` | get/set via `setAbility()` |
 | `abilityNumber` | `number` | get/set via `setAbilityNumber()` |
 | `addMove(move: number, pushOut: boolean)` | `boolean` |  |
-| `b2w2` | `boolean` | readonly (computed) |
-| `bdsp` | `boolean` | readonly (computed) |
-| `bw` | `boolean` | readonly (computed) |
+| `b2w2` | `boolean` | get-only |
+| `bdsp` | `boolean` | get-only |
+| `bw` | `boolean` | get-only |
 | `ball` | `number` | get/set via `setBall()` |
 | `canHoldItem(valid: readonly number[])` | `boolean` |  |
 | `characteristic` | `number` | readonly (computed) |
-| `checksumValid` | `boolean` | readonly (computed) — Indicates if the data has a proper checksum. |
+| `checksumValid` | `boolean` | get-only — Indicates if the data has a proper checksum. |
 | `clearInvalidMoves()` | `void` | Clears moves that a  may have, possibly from a future generation. |
 | `clone()` | `PKM` | Deep clones the  object. The clone will not have any shared resources with the source. |
-| `context` | `"None" \| "Gen1" \| "Gen2" \| "Gen3" \| "Gen4" \| "Gen5" \| "Gen6" \| "Gen7" \| "Gen8" \| "Gen9" \| "SplitInvalid" \| "Gen7b" \| "Gen8a" \| "Gen8b" \| "Gen9a" \| "MaxInvalid"` | readonly (computed) |
+| `context` | `"None" \| "Gen1" \| "Gen2" \| "Gen3" \| "Gen4" \| "Gen5" \| "Gen6" \| "Gen7" \| "Gen8" \| "Gen9" \| "SplitInvalid" \| "Gen7b" \| "Gen8a" \| "Gen8b" \| "Gen9a" \| "MaxInvalid"` | get-only |
 | `currentFriendship` | `number` | get/set via `setCurrentFriendship()` |
 | `currentHandler` | `number` | get/set via `setCurrentHandler()` |
 | `currentLevel` | `number` | readonly (computed) |
-| `data` | `Uint8Array` | readonly (computed) |
+| `data` | `Uint8Array` | get-only |
 | `displaysid` | `number` | get/set via `setDisplaysid()` |
 | `displaytid` | `number` | get/set via `setDisplaytid()` |
-| `e` | `boolean` | readonly (computed) |
+| `e` | `boolean` | get-only |
 | `evTotal` | `number` | readonly (computed) |
 | `evAtk` | `number` | get/set via `setEvAtk()` |
 | `evDef` | `number` | get/set via `setEvDef()` |
@@ -2456,9 +2371,9 @@ Static members:
 | `eggYear` | `number` | get/set via `setEggYear()` |
 | `encryptionConstant` | `number` | get/set via `setEncryptionConstant()` |
 | `equalsStored(pk: PKM)` | `boolean` |  |
-| `extension` | `string` | readonly (computed) |
-| `extraBytes` | `readonly number[]` | readonly (computed) — Bytes in the data structure that are unused, either as alignment padding, or were reserved and never used. |
-| `frlg` | `boolean` | readonly (computed) |
+| `extension` | `string` | get-only |
+| `extraBytes` | `readonly number[]` | get-only — Bytes in the data structure that are unused, either as alignment padding, or were reserved and never used. |
+| `frlg` | `boolean` | get-only |
 | `fatefulEncounter` | `boolean` | get/set via `setFatefulEncounter()` |
 | `fileName` | `string` | readonly (computed) |
 | `fileNameWithoutExtension` | `string` | readonly (computed) |
@@ -2467,20 +2382,20 @@ Static members:
 | `forcePartyData()` | `boolean` | Enforces that Party Stat values are present. |
 | `form` | `number` | get/set via `setForm()` |
 | `format` | `number` | readonly (computed) |
-| `gg` | `boolean` | readonly (computed) |
-| `go` | `boolean` | readonly (computed) |
-| `goHome` | `boolean` | readonly (computed) |
-| `goLgpe` | `boolean` | readonly (computed) |
-| `gen1` | `boolean` | readonly (computed) |
-| `gen2` | `boolean` | readonly (computed) |
-| `gen3` | `boolean` | readonly (computed) |
-| `gen4` | `boolean` | readonly (computed) |
-| `gen5` | `boolean` | readonly (computed) |
-| `gen6` | `boolean` | readonly (computed) |
-| `gen7` | `boolean` | readonly (computed) |
-| `gen8` | `boolean` | readonly (computed) |
-| `gen9` | `boolean` | readonly (computed) |
-| `genu` | `boolean` | readonly (computed) |
+| `gg` | `boolean` | get-only |
+| `go` | `boolean` | get-only |
+| `goHome` | `boolean` | get-only |
+| `goLgpe` | `boolean` | get-only |
+| `gen1` | `boolean` | get-only |
+| `gen2` | `boolean` | get-only |
+| `gen3` | `boolean` | get-only |
+| `gen4` | `boolean` | get-only |
+| `gen5` | `boolean` | get-only |
+| `gen6` | `boolean` | get-only |
+| `gen7` | `boolean` | get-only |
+| `gen8` | `boolean` | get-only |
+| `gen9` | `boolean` | get-only |
+| `genu` | `boolean` | get-only |
 | `gender` | `number` | get/set via `setGender()` |
 | `generation` | `number` | readonly (computed) |
 | `getBasepp(move: number)` | `number` |  |
@@ -2500,13 +2415,13 @@ Static members:
 | `getString(data: Uint8Array)` | `string` |  |
 | `getStringLength(data: Uint8Array)` | `number` |  |
 | `getStringTerminatorIndex(data: Uint8Array)` | `number` |  |
-| `hgss` | `boolean` | readonly (computed) |
-| `hpPower` | `number` | readonly (computed) |
+| `hgss` | `boolean` | get-only |
+| `hpPower` | `number` | get-only |
 | `hpType` | `number` | get/set via `setHpType()` |
 | `handlingTrainerFriendship` | `number` | get/set via `setHandlingTrainerFriendship()` |
 | `handlingTrainerGender` | `number` | get/set via `setHandlingTrainerGender()` |
 | `handlingTrainerName` | `string` | get/set via `setHandlingTrainerName()` |
-| `handlingTrainerTrash` | `Uint8Array` | readonly (computed) |
+| `handlingTrainerTrash` | `Uint8Array` | get-only |
 | `hasMove(move: number)` | `boolean` |  |
 | `hasOriginalMetLocation` | `boolean` | readonly (computed) — Checks if the PKM has its original met location. |
 | `hasRelearnMove(move: number)` | `boolean` |  |
@@ -2534,21 +2449,21 @@ Static members:
 | `isUntraded` | `boolean` | readonly (computed) |
 | `japanese` | `boolean` | readonly (computed) |
 | `korean` | `boolean` | readonly (computed) |
-| `la` | `boolean` | readonly (computed) |
-| `lgpe` | `boolean` | readonly (computed) |
+| `la` | `boolean` | get-only |
+| `lgpe` | `boolean` | get-only |
 | `language` | `number` | get/set via `setLanguage()` |
 | `loadStats(p: IBaseStat, stats: readonly number[])` | `void` |  |
 | `loadString(data: Uint8Array, text: readonly string[])` | `number` |  |
-| `maxAbilityid` | `number` | readonly (computed) |
-| `maxBallid` | `number` | readonly (computed) |
-| `maxev` | `number` | readonly (computed) |
-| `maxGameid` | `"Any" \| "S" \| "R" \| "E" \| "FR" \| "LG" \| "HG" \| "SS" \| "D" \| "P" \| "Pt" \| "CXD" \| "BATREV" \| "W" \| "B" \| "W2" \| "B2" \| "X" \| "Y" \| "AS" \| "OR" \| "SN" \| "MN" \| "US" \| "UM" \| "GO" \| "RD" \| "GN" \| "BU" \| "YW" \| "GD" \| "SI" \| "C" \| "GP" \| "GE" \| "SW" \| "SH" \| "PLA" \| "BD" \| "SP" \| "SL" \| "VL" \| "ZA" \| "CP" \| "RB" \| "RBY" \| "GS" \| "GSC" \| "RS" \| "RSE" \| "FRLG" \| "RSBOX" \| "COLO" \| "XD" \| "DP" \| "DPPt" \| "HGSS" \| "BW" \| "B2W2" \| "XY" \| "ORASDEMO" \| "ORAS" \| "SM" \| "USUM" \| "GG" \| "SWSH" \| "BDSP" \| "SV" \| "Gen1" \| "Gen2" \| "Gen3" \| "Gen4" \| "Gen5" \| "Gen6" \| "Gen7" \| "Gen7b" \| "Gen8" \| "Gen9" \| "StadiumJ" \| "Stadium" \| "Stadium2" \| "EFL" \| "Invalid"` | readonly (computed) |
-| `maxiv` | `number` | readonly (computed) |
-| `maxItemid` | `number` | readonly (computed) |
-| `maxMoveid` | `number` | readonly (computed) |
-| `maxSpeciesid` | `number` | readonly (computed) |
-| `maxStringLengthNickname` | `number` | readonly (computed) — Maximum length a Nickname can be represented as. |
-| `maxStringLengthTrainer` | `number` | readonly (computed) — Maximum length a Trainer Name can be represented as. |
+| `maxAbilityid` | `number` | get-only |
+| `maxBallid` | `number` | get-only |
+| `maxev` | `number` | get-only |
+| `maxGameid` | `"Any" \| "S" \| "R" \| "E" \| "FR" \| "LG" \| "HG" \| "SS" \| "D" \| "P" \| "Pt" \| "CXD" \| "BATREV" \| "W" \| "B" \| "W2" \| "B2" \| "X" \| "Y" \| "AS" \| "OR" \| "SN" \| "MN" \| "US" \| "UM" \| "GO" \| "RD" \| "GN" \| "BU" \| "YW" \| "GD" \| "SI" \| "C" \| "GP" \| "GE" \| "SW" \| "SH" \| "PLA" \| "BD" \| "SP" \| "SL" \| "VL" \| "ZA" \| "CP" \| "RB" \| "RBY" \| "GS" \| "GSC" \| "RS" \| "RSE" \| "FRLG" \| "RSBOX" \| "COLO" \| "XD" \| "DP" \| "DPPt" \| "HGSS" \| "BW" \| "B2W2" \| "XY" \| "ORASDEMO" \| "ORAS" \| "SM" \| "USUM" \| "GG" \| "SWSH" \| "BDSP" \| "SV" \| "Gen1" \| "Gen2" \| "Gen3" \| "Gen4" \| "Gen5" \| "Gen6" \| "Gen7" \| "Gen7b" \| "Gen8" \| "Gen9" \| "StadiumJ" \| "Stadium" \| "Stadium2" \| "EFL" \| "Invalid"` | get-only |
+| `maxiv` | `number` | get-only |
+| `maxItemid` | `number` | get-only |
+| `maxMoveid` | `number` | get-only |
+| `maxSpeciesid` | `number` | get-only |
+| `maxStringLengthNickname` | `number` | get-only — Maximum length a Nickname can be represented as. |
+| `maxStringLengthTrainer` | `number` | get-only — Maximum length a Trainer Name can be represented as. |
 | `maximumiv` | `number` | readonly (computed) |
 | `metDate` | `string \| null` | get/set via `setMetDate()` — The date the Pokémon was met. |
 | `metDay` | `number` | get/set via `setMetDay()` |
@@ -2556,7 +2471,7 @@ Static members:
 | `metLocation` | `number` | get/set via `setMetLocation()` |
 | `metMonth` | `number` | get/set via `setMetMonth()` |
 | `metYear` | `number` | get/set via `setMetYear()` |
-| `minGameid` | `"Any" \| "S" \| "R" \| "E" \| "FR" \| "LG" \| "HG" \| "SS" \| "D" \| "P" \| "Pt" \| "CXD" \| "BATREV" \| "W" \| "B" \| "W2" \| "B2" \| "X" \| "Y" \| "AS" \| "OR" \| "SN" \| "MN" \| "US" \| "UM" \| "GO" \| "RD" \| "GN" \| "BU" \| "YW" \| "GD" \| "SI" \| "C" \| "GP" \| "GE" \| "SW" \| "SH" \| "PLA" \| "BD" \| "SP" \| "SL" \| "VL" \| "ZA" \| "CP" \| "RB" \| "RBY" \| "GS" \| "GSC" \| "RS" \| "RSE" \| "FRLG" \| "RSBOX" \| "COLO" \| "XD" \| "DP" \| "DPPt" \| "HGSS" \| "BW" \| "B2W2" \| "XY" \| "ORASDEMO" \| "ORAS" \| "SM" \| "USUM" \| "GG" \| "SWSH" \| "BDSP" \| "SV" \| "Gen1" \| "Gen2" \| "Gen3" \| "Gen4" \| "Gen5" \| "Gen6" \| "Gen7" \| "Gen7b" \| "Gen8" \| "Gen9" \| "StadiumJ" \| "Stadium" \| "Stadium2" \| "EFL" \| "Invalid"` | readonly (computed) |
+| `minGameid` | `"Any" \| "S" \| "R" \| "E" \| "FR" \| "LG" \| "HG" \| "SS" \| "D" \| "P" \| "Pt" \| "CXD" \| "BATREV" \| "W" \| "B" \| "W2" \| "B2" \| "X" \| "Y" \| "AS" \| "OR" \| "SN" \| "MN" \| "US" \| "UM" \| "GO" \| "RD" \| "GN" \| "BU" \| "YW" \| "GD" \| "SI" \| "C" \| "GP" \| "GE" \| "SW" \| "SH" \| "PLA" \| "BD" \| "SP" \| "SL" \| "VL" \| "ZA" \| "CP" \| "RB" \| "RBY" \| "GS" \| "GSC" \| "RS" \| "RSE" \| "FRLG" \| "RSBOX" \| "COLO" \| "XD" \| "DP" \| "DPPt" \| "HGSS" \| "BW" \| "B2W2" \| "XY" \| "ORASDEMO" \| "ORAS" \| "SM" \| "USUM" \| "GG" \| "SWSH" \| "BDSP" \| "SV" \| "Gen1" \| "Gen2" \| "Gen3" \| "Gen4" \| "Gen5" \| "Gen6" \| "Gen7" \| "Gen7b" \| "Gen8" \| "Gen9" \| "StadiumJ" \| "Stadium" \| "Stadium2" \| "EFL" \| "Invalid"` | get-only |
 | `move1` | `number` | get/set via `setMove1()` |
 | `move1Pp` | `number` | get/set via `setMove1Pp()` |
 | `move1PpUps` | `number` | get/set via `setMove1PpUps()` |
@@ -2573,21 +2488,21 @@ Static members:
 | `moves` | `readonly number[]` | get/set via `setMoves()` |
 | `nature` | `"Hardy" \| "Lonely" \| "Brave" \| "Adamant" \| "Naughty" \| "Bold" \| "Docile" \| "Relaxed" \| "Impish" \| "Lax" \| "Timid" \| "Hasty" \| "Serious" \| "Jolly" \| "Naive" \| "Modest" \| "Mild" \| "Quiet" \| "Bashful" \| "Rash" \| "Calm" \| "Gentle" \| "Sassy" \| "Careful" \| "Quirky" \| "Random"` | get/set via `setNature()` |
 | `nickname` | `string` | get/set via `setNickname()` |
-| `nicknameTrash` | `Uint8Array` | readonly (computed) |
+| `nicknameTrash` | `Uint8Array` | get-only |
 | `originalTrainerFriendship` | `number` | get/set via `setOriginalTrainerFriendship()` |
 | `originalTrainerGender` | `number` | get/set via `setOriginalTrainerGender()` |
 | `originalTrainerName` | `string` | get/set via `setOriginalTrainerName()` |
-| `originalTrainerTrash` | `Uint8Array` | readonly (computed) |
+| `originalTrainerTrash` | `Uint8Array` | get-only |
 | `pid` | `number` | get/set via `setPid()` |
 | `pidAbility` | `number` | readonly (computed) |
 | `psv` | `number` | readonly (computed) |
 | `partyStatsPresent` | `boolean` | readonly (computed) — Indicates if Party Stats are present. False if not initialized (from stored format). |
-| `personalInfo` | `PersonalInfo` | readonly (computed) |
+| `personalInfo` | `PersonalInfo` | get-only |
 | `pokerusDays` | `number` | get/set via `setPokerusDays()` |
 | `pokerusStrain` | `number` | get/set via `setPokerusStrain()` |
 | `potentialRating` | `number` | readonly (computed) — Gets the IV Judge Rating value. |
 | `prepareNickname()` | `void` | Conditions the  data to safely terminate the Nickname string from the text entry screen. |
-| `pt` | `boolean` | readonly (computed) |
+| `pt` | `boolean` | get-only |
 | `refreshAbility(n: number)` | `void` |  |
 | `refreshChecksum()` | `void` | Updates the checksum of the . |
 | `relearnMove1` | `number` | get/set via `setRelearnMove1()` |
@@ -2597,11 +2512,11 @@ Static members:
 | `relearnMoves` | `readonly number[]` | get/set via `setRelearnMoves()` |
 | `resetPartyStats()` | `void` | Clears any status condition and refreshes the stats. |
 | `sid16` | `number` | get/set via `setSid16()` |
-| `sizeParty` | `number` | readonly (computed) |
-| `sizeStored` | `number` | readonly (computed) |
-| `sm` | `boolean` | readonly (computed) |
-| `sv` | `boolean` | readonly (computed) |
-| `swsh` | `boolean` | readonly (computed) |
+| `sizeParty` | `number` | get-only |
+| `sizeStored` | `number` | get-only |
+| `sm` | `boolean` | get-only |
+| `sv` | `boolean` | get-only |
+| `swsh` | `boolean` | get-only |
 | `setEvs(value: readonly number[])` | `void` |  |
 | `setIvs(value: readonly number[])` | `void` |  |
 | `setIvs(iv32: number)` | `void` |  |
@@ -2638,16 +2553,16 @@ Static members:
 | `statusCondition` | `number` | get/set via `setStatusCondition()` |
 | `tid16` | `number` | get/set via `setTid16()` |
 | `tsv` | `number` | readonly (computed) |
-| `traineridDisplayFormat` | `"None" \| "SixteenBitSingle" \| "SixteenBit" \| "SixDigit"` | readonly (computed) |
+| `traineridDisplayFormat` | `"None" \| "SixteenBitSingle" \| "SixteenBit" \| "SixDigit"` | get-only |
 | `trainersid7` | `number` | get/set via `setTrainersid7()` |
 | `trainertid7` | `number` | get/set via `setTrainertid7()` |
 | `transferPropertiesWithReflection(result: PKM)` | `void` |  |
-| `trashCharCountNickname` | `number` | readonly (computed) — Total characters allocated for holding a Nickname. |
-| `trashCharCountTrainer` | `number` | readonly (computed) — Total characters allocated for holding a Trainer Name. |
-| `usum` | `boolean` | readonly (computed) |
-| `vc` | `boolean` | readonly (computed) |
-| `vc1` | `boolean` | readonly (computed) |
-| `vc2` | `boolean` | readonly (computed) |
+| `trashCharCountNickname` | `number` | get-only — Total characters allocated for holding a Nickname. |
+| `trashCharCountTrainer` | `number` | get-only — Total characters allocated for holding a Trainer Name. |
+| `usum` | `boolean` | get-only |
+| `vc` | `boolean` | get-only |
+| `vc1` | `boolean` | get-only |
+| `vc2` | `boolean` | get-only |
 | `valid` | `boolean` | get/set via `setValid()` — Rough indication if the data is junk or not. |
 | `version` | `"Any" \| "S" \| "R" \| "E" \| "FR" \| "LG" \| "HG" \| "SS" \| "D" \| "P" \| "Pt" \| "CXD" \| "BATREV" \| "W" \| "B" \| "W2" \| "B2" \| "X" \| "Y" \| "AS" \| "OR" \| "SN" \| "MN" \| "US" \| "UM" \| "GO" \| "RD" \| "GN" \| "BU" \| "YW" \| "GD" \| "SI" \| "C" \| "GP" \| "GE" \| "SW" \| "SH" \| "PLA" \| "BD" \| "SP" \| "SL" \| "VL" \| "ZA" \| "CP" \| "RB" \| "RBY" \| "GS" \| "GSC" \| "RS" \| "RSE" \| "FRLG" \| "RSBOX" \| "COLO" \| "XD" \| "DP" \| "DPPt" \| "HGSS" \| "BW" \| "B2W2" \| "XY" \| "ORASDEMO" \| "ORAS" \| "SM" \| "USUM" \| "GG" \| "SWSH" \| "BDSP" \| "SV" \| "Gen1" \| "Gen2" \| "Gen3" \| "Gen4" \| "Gen5" \| "Gen6" \| "Gen7" \| "Gen7b" \| "Gen8" \| "Gen9" \| "StadiumJ" \| "Stadium" \| "Stadium2" \| "EFL" \| "Invalid"` | get/set via `setVersion()` |
 | `wasEgg` | `boolean` | readonly (computed) |
@@ -2658,8 +2573,8 @@ Static members:
 | `writeEncryptedDataParty(stored: Uint8Array, party: Uint8Array)` | `void` |  |
 | `writeEncryptedDataParty(destination: Uint8Array)` | `void` |  |
 | `writeEncryptedDataStored(destination: Uint8Array)` | `void` |  |
-| `xy` | `boolean` | readonly (computed) |
-| `za` | `boolean` | readonly (computed) |
+| `xy` | `boolean` | get-only |
+| `za` | `boolean` | get-only |
 
 ### `PlayerBag`
 
@@ -2671,11 +2586,11 @@ Static members:
 | `copyTo(sav: SaveFile)` | `void` |  |
 | `getMaxCount(type: "None" | "Items" | "KeyItems" | "TMHMs" | "Medicine" | "Berries" | "Balls" | "BattleItems" | "MailItems" | "PCItems" | "FreeSpace" | "ZCrystals" | "Candy" | "Treasure" | "Ingredients" | "MegaStones", itemIndex: number)` | `number` |  |
 | `getPouch(type: "None" | "Items" | "KeyItems" | "TMHMs" | "Medicine" | "Berries" | "Balls" | "BattleItems" | "MailItems" | "PCItems" | "FreeSpace" | "ZCrystals" | "Candy" | "Treasure" | "Ingredients" | "MegaStones")` | `InventoryPouch` |  |
-| `info` | `IItemStorage` | readonly (computed) |
+| `info` | `IItemStorage` | get-only |
 | `isLegal(type: "None" | "Items" | "KeyItems" | "TMHMs" | "Medicine" | "Berries" | "Balls" | "BattleItems" | "MailItems" | "PCItems" | "FreeSpace" | "ZCrystals" | "Candy" | "Treasure" | "Ingredients" | "MegaStones", itemIndex: number, itemCount: number)` | `boolean` |  |
 | `isQuantitySane(type: "None" | "Items" | "KeyItems" | "TMHMs" | "Medicine" | "Berries" | "Balls" | "BattleItems" | "MailItems" | "PCItems" | "FreeSpace" | "ZCrystals" | "Candy" | "Treasure" | "Ingredients" | "MegaStones", itemIndex: number, count: number, hasNew: boolean, HaX: boolean)` | `boolean` |  |
-| `maxQuantityHax` | `number` | readonly (computed) |
-| `pouches` | `readonly InventoryPouch[]` | readonly (computed) — Gets the pouches represented by the bag. |
+| `maxQuantityHax` | `number` | get-only |
+| `pouches` | `readonly InventoryPouch[]` | get-only — Gets the pouches represented by the bag. |
 
 ### `PlayerBag1`
 
@@ -2794,9 +2709,9 @@ Static members:
 
 | Member | Type | Description |
 | --- | --- | --- |
-| `dailyPairs6` | `Uint8Array` | readonly (computed) |
-| `dailyPairs7` | `Uint8Array` | readonly (computed) |
-| `festaPairs7` | `Uint8Array` | readonly (computed) — Festa pairs; if updating the lower index record, update the Festa Mission record if currently active? |
+| `dailyPairs6` | `Uint8Array` | get-only |
+| `dailyPairs7` | `Uint8Array` | get-only |
+| `festaPairs7` | `Uint8Array` | get-only — Festa pairs; if updating the lower index record, update the Festa Mission record if currently active? |
 | `getMax(recordID: number, maxes: Uint8Array)` | `number` |  |
 | `getOffset(recordID: number)` | `number` |  |
 
@@ -2811,20 +2726,20 @@ Static members:
 | `battleStyleSwitch` | `boolean` | get/set via `setBattleStyleSwitch()` |
 | `boxesInitialized` | `boolean` | get/set via `setBoxesInitialized()` |
 | `coin` | `number` | get/set via `setCoin()` |
-| `daycareSlotCount` | `number` | readonly (computed) |
-| `eventFlagCount` | `number` | readonly (computed) |
+| `daycareSlotCount` | `number` | get-only |
+| `eventFlagCount` | `number` | get-only |
 | `eventSpawnFlags` | `readonly boolean[]` | get/set via `setEventSpawnFlags()` |
-| `eventWorkCount` | `number` | readonly (computed) |
+| `eventWorkCount` | `number` | get-only |
 | `gbPrinterBrightness` | `number` | get/set via `setGbPrinterBrightness()` |
 | `getBoxName(box: number)` | `string` |  |
 | `getDaycareSlot(index: number)` | `Uint8Array` |  |
 | `getEventFlag(flagNumber: number)` | `boolean` |  |
 | `getWork(index: number)` | `number` |  |
-| `hallOfFame` | `HallOfFameReader1` | readonly (computed) |
+| `hallOfFame` | `HallOfFameReader1` | get-only |
 | `hallOfFameCount` | `number` | get/set via `setHallOfFameCount()` |
 | `isDaycareOccupied(index: number)` | `boolean` |  |
 | `isSilphLaprasReceived` | `boolean` | get/set via `setIsSilphLaprasReceived()` |
-| `isVirtualConsole` | `boolean` | readonly (computed) |
+| `isVirtualConsole` | `boolean` | get-only |
 | `japanese` | `boolean` | readonly (computed) |
 | `korean` | `boolean` | readonly (computed) |
 | `originalTrainerTrash` | `Uint8Array` | get/set via `setOriginalTrainerTrash()` |
@@ -2835,15 +2750,15 @@ Static members:
 | `rivalName` | `string` | get/set via `setRivalName()` |
 | `rivalNameTrash` | `Uint8Array` | get/set via `setRivalNameTrash()` |
 | `rivalStarter` | `number` | get/set via `setRivalStarter()` |
-| `saveRevision` | `number` | readonly (computed) |
-| `saveRevisionString` | `string` | readonly (computed) |
+| `saveRevision` | `number` | get-only |
+| `saveRevisionString` | `string` | get-only |
 | `setDaycareOccupied(index: number, occupied: boolean)` | `void` |  |
 | `setEventFlag(flagNumber: number, value: boolean)` | `void` |  |
 | `setWork(index: number, value: number)` | `void` |  |
 | `sound` | `number` | get/set via `setSound()` |
 | `starter` | `number` | get/set via `setStarter()` |
 | `textSpeed` | `number` | get/set via `setTextSpeed()` |
-| `wramd72e` | `number` | readonly (computed) |
+| `wramd72e` | `number` | get-only |
 
 Static members:
 
@@ -2899,10 +2814,10 @@ Static members:
 | `blueCardPoints` | `number` | get/set via `setBlueCardPoints()` |
 | `coin` | `number` | get/set via `setCoin()` |
 | `daycareFlagByte(index: number)` | `number` |  |
-| `daycareSlotCount` | `number` | readonly (computed) |
+| `daycareSlotCount` | `number` | get-only |
 | `enablegsBallMobileEvent()` | `void` | Triggered on Virtual Console by adding Hall of Fame entry, enabling the event. |
-| `eventFlagCount` | `number` | readonly (computed) |
-| `eventWorkCount` | `number` | readonly (computed) |
+| `eventFlagCount` | `number` | get-only |
+| `eventWorkCount` | `number` | get-only |
 | `gbMobileCable` | `"None" \| "Blue" \| "Yellow" \| "Green" \| "Red" \| "Purple" \| "Black" \| "Pink" \| "Gray" \| "Debug" \| "Disabled"` | get/set via `setGbMobileCable()` |
 | `gbPrinterBrightness` | `number` | get/set via `setGbPrinterBrightness()` |
 | `getBoxName(box: number)` | `string` |  |
@@ -2912,24 +2827,24 @@ Static members:
 | `getWork(index: number)` | `number` |  |
 | `isDaycareOccupied(slot: number)` | `boolean` |  |
 | `isEggAvailable` | `boolean` | get/set via `setIsEggAvailable()` |
-| `isEnabledgsBallMobileEvent` | `boolean` | readonly (computed) |
-| `isgbMobileAvailable` | `boolean` | readonly (computed) |
-| `isgbMobileEnabled` | `boolean` | readonly (computed) |
+| `isEnabledgsBallMobileEvent` | `boolean` | get-only |
+| `isgbMobileAvailable` | `boolean` | get-only |
+| `isgbMobileEnabled` | `boolean` | get-only |
 | `isMysteryGiftUnlocked` | `boolean` | get/set via `setIsMysteryGiftUnlocked()` |
-| `isVirtualConsole` | `boolean` | readonly (computed) |
+| `isVirtualConsole` | `boolean` | get-only |
 | `japanese` | `boolean` | readonly (computed) |
 | `korean` | `boolean` | readonly (computed) |
 | `menuAccountOn` | `boolean` | get/set via `setMenuAccountOn()` |
 | `mysteryGiftItem` | `number` | get/set via `setMysteryGiftItem()` |
 | `originalTrainerTrash` | `Uint8Array` | get/set via `setOriginalTrainerTrash()` |
 | `palette` | `number` | get/set via `setPalette()` |
-| `resetKey` | `number` | readonly (computed) |
+| `resetKey` | `number` | get-only |
 | `resetrtc()` | `void` | Sets the "Time Not Set" flag to the RTC Flag list. |
 | `rivalName` | `string` | get/set via `setRivalName()` |
 | `rivalNameTrash` | `Uint8Array` | get/set via `setRivalNameTrash()` |
 | `saveFileExists` | `boolean` | get/set via `setSaveFileExists()` |
-| `saveRevision` | `number` | readonly (computed) |
-| `saveRevisionString` | `string` | readonly (computed) |
+| `saveRevision` | `number` | get-only |
+| `saveRevisionString` | `string` | get-only |
 | `setBoxName(box: number, value: readonly string[])` | `void` |  |
 | `setDaycareOccupied(slot: number, occupied: boolean)` | `void` |  |
 | `setEventFlag(flagNumber: number, value: boolean)` | `void` |  |
@@ -2957,8 +2872,8 @@ Static members:
 | --- | --- | --- |
 | `getBoxName(box: number)` | `string` |  |
 | `getTeamName(team: number)` | `string` |  |
-| `mailboxBlockSize` | `number` | readonly (computed) |
-| `mailboxHeldBlockSize` | `number` | readonly (computed) |
+| `mailboxBlockSize` | `number` | get-only |
+| `mailboxHeldBlockSize` | `number` | get-only |
 | `setBoxName(box: number, name: readonly string[])` | `void` |  |
 
 Static members:
@@ -2989,10 +2904,10 @@ Static members:
 | `colosseumRaw1` | `number` | get/set via `setColosseumRaw1()` |
 | `colosseumRaw2` | `number` | get/set via `setColosseumRaw2()` |
 | `colosseumReceivedAgeto` | `boolean` | get/set via `setColosseumReceivedAgeto()` — Received Celebi Gift from JP Colosseum Bonus Disc |
-| `daycareSlotCount` | `number` | readonly (computed) |
-| `eberryName` | `string` | readonly (computed) |
-| `eventFlagCount` | `number` | readonly (computed) |
-| `eventWorkCount` | `number` | readonly (computed) |
+| `daycareSlotCount` | `number` | get-only |
+| `eberryName` | `string` | get-only |
+| `eventFlagCount` | `number` | get-only |
+| `eventWorkCount` | `number` | get-only |
 | `forceLoad(version: "Any" | "S" | "R" | "E" | "FR" | "LG" | "HG" | "SS" | "D" | "P" | "Pt" | "CXD" | "BATREV" | "W" | "B" | "W2" | "B2" | "X" | "Y" | "AS" | "OR" | "SN" | "MN" | "US" | "UM" | "GO" | "RD" | "GN" | "BU" | "YW" | "GD" | "SI" | "C" | "GP" | "GE" | "SW" | "SH" | "PLA" | "BD" | "SP" | "SL" | "VL" | "ZA" | "CP" | "RB" | "RBY" | "GS" | "GSC" | "RS" | "RSE" | "FRLG" | "RSBOX" | "COLO" | "XD" | "DP" | "DPPt" | "HGSS" | "BW" | "B2W2" | "XY" | "ORASDEMO" | "ORAS" | "SM" | "USUM" | "GG" | "SWSH" | "BDSP" | "SV" | "Gen1" | "Gen2" | "Gen3" | "Gen4" | "Gen5" | "Gen6" | "Gen7" | "Gen7b" | "Gen8" | "Gen9" | "StadiumJ" | "Stadium" | "Stadium2" | "EFL" | "Invalid")` | `SAV3` |  |
 | `getBoxName(box: number)` | `string` |  |
 | `getBoxWallpaper(box: number)` | `number` |  |
@@ -3005,28 +2920,28 @@ Static members:
 | `getHallOfFameData()` | `Uint8Array` | Hall of Fame data is split across two sectors. |
 | `getRecord(record: number)` | `number` |  |
 | `getWork(index: number)` | `number` |  |
-| `giftRibbons` | `Uint8Array` | readonly (computed) |
+| `giftRibbons` | `Uint8Array` | get-only |
 | `giftRibbonsClear()` | `void` |  |
 | `giftRibbonsImport(trade: Uint8Array)` | `void` |  |
 | `hasReceivedWishmkrJirachi` | `boolean` | get/set via `setHasReceivedWishmkrJirachi()` — Received Jirachi Gift from Colosseum Bonus Disc |
 | `hasUsedrsbox` | `boolean` | get/set via `setHasUsedrsbox()` — Indicates if this save has connected to RSBOX and triggered the free False Swipe Swablu Egg giveaway. |
 | `isCorruptPokedexff()` | `boolean` |  |
 | `isDaycareOccupied(slot: number)` | `boolean` |  |
-| `isEberryEngima` | `boolean` | readonly (computed) |
+| `isEberryEngima` | `boolean` | get-only |
 | `isEggAvailable` | `boolean` | get/set via `setIsEggAvailable()` |
-| `isFullSaveFile` | `boolean` | readonly (computed) — Indicates if the extdata sections of the save file are available for get/set. |
-| `isMisconfiguredSize` | `boolean` | readonly (computed) — Indicates if the save file was a misconfigured (smaller) size, and thus not all extra blocks may be present. |
-| `isVirtualConsole` | `boolean` | readonly (computed) |
+| `isFullSaveFile` | `boolean` | get-only — Indicates if the extdata sections of the save file are available for get/set. |
+| `isMisconfiguredSize` | `boolean` | get-only — Indicates if the save file was a misconfigured (smaller) size, and thus not all extra blocks may be present. |
+| `isVirtualConsole` | `boolean` | get-only |
 | `japanese` | `boolean` | readonly (computed) |
 | `korean` | `boolean` | readonly (computed) |
-| `large` | `Uint8Array` | readonly (computed) |
-| `largeBlock` | `ISaveBlock3Large` | readonly (computed) |
+| `large` | `Uint8Array` | get-only |
+| `largeBlock` | `ISaveBlock3Large` | get-only |
 | `largeBuffer` | `Uint8Array` | get/set via `setLargeBuffer()` |
 | `mirrorSeenFlags()` | `void` | In Gen 3, the seen flags are stored in three different places. Mirror them to each other to ensure consistency. |
 | `nationalDex` | `boolean` | get/set via `setNationalDex()` |
 | `rsBoxDepositEggsUnlocked` | `number` | get/set via `setRsBoxDepositEggsUnlocked()` — 1 for ExtremeSpeed Zigzagoon (at 100 deposited), 2 for Pay Day Skitty (at 500 deposited), 3 for Surf Pichu (at 1499 deposited) |
-| `saveRevision` | `number` | readonly (computed) |
-| `saveRevisionString` | `string` | readonly (computed) |
+| `saveRevision` | `number` | get-only |
+| `saveRevisionString` | `string` | get-only |
 | `setBoxName(box: number, value: readonly string[])` | `void` |  |
 | `setBoxWallpaper(box: number, value: number)` | `void` |  |
 | `setDaycareexp(index: number, value: number)` | `void` |  |
@@ -3035,10 +2950,10 @@ Static members:
 | `setHallOfFameData(value: Uint8Array)` | `void` |  |
 | `setRecord(record: number, value: number)` | `void` |  |
 | `setWork(index: number, value: number)` | `void` |  |
-| `small` | `Uint8Array` | readonly (computed) |
-| `smallBlock` | `ISaveBlock3Small` | readonly (computed) |
+| `small` | `Uint8Array` | get-only |
+| `smallBlock` | `ISaveBlock3Small` | get-only |
 | `smallBuffer` | `Uint8Array` | get/set via `setSmallBuffer()` |
-| `storage` | `Uint8Array` | readonly (computed) |
+| `storage` | `Uint8Array` | get-only |
 | `storageBuffer` | `Uint8Array` | get/set via `setStorageBuffer()` |
 | `writeBothSaveSlots(data: Uint8Array)` | `void` |  |
 
@@ -3061,7 +2976,7 @@ Static members:
 | `couponsTotal` | `number` | get/set via `setCouponsTotal()` |
 | `currentRegion` | `"NoRegion" \| "NTSC_J" \| "NTSC_U" \| "PAL"` | get/set via `setCurrentRegion()` |
 | `daycareDepositLevel` | `number` | get/set via `setDaycareDepositLevel()` |
-| `daycareSlotCount` | `number` | readonly (computed) |
+| `daycareSlotCount` | `number` | get-only |
 | `gcGameIndex` | `"None" \| "FR" \| "LG" \| "S" \| "R" \| "E" \| "CXD"` | get/set via `setGcGameIndex()` |
 | `gcLanguage` | `"Hacked" \| "Japanese" \| "English" \| "German" \| "French" \| "Italian" \| "Spanish" \| "UNUSED_6"` | get/set via `setGcLanguage()` |
 | `getBoxName(box: number)` | `string` |  |
@@ -3071,15 +2986,15 @@ Static members:
 | `memoryCard` | `SAV3GCMemoryCard` | get/set via `setMemoryCard()` |
 | `ot2` | `string` | get/set via `setOt2()` |
 | `originalRegion` | `"NoRegion" \| "NTSC_J" \| "NTSC_U" \| "PAL"` | get/set via `setOriginalRegion()` |
-| `originalTrainerTrash` | `Uint8Array` | readonly (computed) |
+| `originalTrainerTrash` | `Uint8Array` | get-only |
 | `pokeCouponTitleBronze` | `boolean` | get/set via `setPokeCouponTitleBronze()` — Received PP Max from JP Colosseum Bonus Disc; for reaching 2,500 |
 | `pokeCouponTitleGold` | `boolean` | get/set via `setPokeCouponTitleGold()` — Received Master Ball from JP Colosseum Bonus Disc; for reaching 30,000 |
 | `pokeCouponTitleSilver` | `boolean` | get/set via `setPokeCouponTitleSilver()` — Received Light Ball Pikachu from JP Colosseum Bonus Disc; for reaching 5,000 |
 | `ruiName` | `string` | get/set via `setRuiName()` |
 | `receivedAgeto` | `boolean` | get/set via `setReceivedAgeto()` — Received Celebi Gift from JP Colosseum Bonus Disc |
 | `receivedAgetogba` | `number` | get/set via `setReceivedAgetogba()` — Used by the JP Colosseum Bonus Disc. Records how many Celebi have been sent to a GBA game. |
-| `saveRevision` | `number` | readonly (computed) |
-| `saveRevisionString` | `string` | readonly (computed) |
+| `saveRevision` | `number` | get-only |
+| `saveRevisionString` | `string` | get-only |
 | `setBoxName(box: number, value: readonly string[])` | `void` |  |
 | `setDaycareexp(index: number, value: number)` | `void` |  |
 | `setDaycareOccupied(slot: number, occupied: boolean)` | `void` |  |
@@ -3097,8 +3012,8 @@ Static members:
 | Member | Type | Description |
 | --- | --- | --- |
 | `battleVideo` | `BattleVideo3` | get/set via `setBattleVideo()` |
-| `battleVideoData` | `Uint8Array` | readonly (computed) |
-| `hasBattleVideo` | `boolean` | readonly (computed) |
+| `battleVideoData` | `Uint8Array` | get-only |
+| `hasBattleVideo` | `boolean` | get-only |
 | `setExtraDataSentinelBattleVideo()` | `void` |  |
 
 ### `SAV3FRLG`
@@ -3141,20 +3056,20 @@ Static members:
 | `coupons` | `number` | get/set via `setCoupons()` |
 | `currentRegion` | `"NoRegion" \| "NTSC_J" \| "NTSC_U" \| "PAL"` | get/set via `setCurrentRegion()` |
 | `daycareDepositLevel` | `number` | get/set via `setDaycareDepositLevel()` |
-| `daycareSlotCount` | `number` | readonly (computed) |
+| `daycareSlotCount` | `number` | get-only |
 | `gcGameIndex` | `"None" \| "FR" \| "LG" \| "S" \| "R" \| "E" \| "CXD"` | get/set via `setGcGameIndex()` |
 | `gcLanguage` | `"Hacked" \| "Japanese" \| "English" \| "German" \| "French" \| "Italian" \| "Spanish" \| "UNUSED_6"` | get/set via `setGcLanguage()` |
 | `getBoxName(box: number)` | `string` |  |
 | `getDaycareexp(index: number)` | `number` |  |
 | `getDaycareSlot(slot: number)` | `Uint8Array` |  |
 | `isDaycareOccupied(slot: number)` | `boolean` |  |
-| `maxShadowid` | `number` | readonly (computed) |
+| `maxShadowid` | `number` | get-only |
 | `memoryCard` | `SAV3GCMemoryCard` | get/set via `setMemoryCard()` |
 | `ofsPouch` | `number` | get/set via `setOfsPouch()` |
 | `originalRegion` | `"NoRegion" \| "NTSC_J" \| "NTSC_U" \| "PAL"` | get/set via `setOriginalRegion()` |
-| `originalTrainerTrash` | `Uint8Array` | readonly (computed) |
-| `saveRevision` | `number` | readonly (computed) |
-| `saveRevisionString` | `string` | readonly (computed) |
+| `originalTrainerTrash` | `Uint8Array` | get-only |
+| `saveRevision` | `number` | get-only |
+| `saveRevisionString` | `string` | get-only |
 | `setBoxName(box: number, value: readonly string[])` | `void` |  |
 | `setDaycareexp(index: number, value: number)` | `void` |  |
 | `setDaycareOccupied(slot: number, occupied: boolean)` | `void` |  |
@@ -3168,18 +3083,18 @@ Static members:
 | `bp` | `number` | get/set via `setBp()` |
 | `badges` | `number` | get/set via `setBadges()` |
 | `battleTowerSeed` | `number` | get/set via `setBattleTowerSeed()` |
-| `chatter` | `Chatter4` | readonly (computed) |
+| `chatter` | `Chatter4` | get-only |
 | `coin` | `number` | get/set via `setCoin()` |
 | `country` | `number` | get/set via `setCountry()` |
-| `daycareSlotCount` | `number` | readonly (computed) |
+| `daycareSlotCount` | `number` | get-only |
 | `daycareStepCounter` | `number` | get/set via `setDaycareStepCounter()` |
-| `dex` | `Zukan4` | readonly (computed) |
+| `dex` | `Zukan4` | get-only |
 | `dexUpgraded` | `number` | get/set via `setDexUpgraded()` |
-| `eventFlagCount` | `number` | readonly (computed) |
-| `eventWorkCount` | `number` | readonly (computed) |
+| `eventFlagCount` | `number` | get-only |
+| `eventWorkCount` | `number` | get-only |
 | `gts` | `number` | get/set via `setGts()` |
 | `gameClear` | `boolean` | get/set via `setGameClear()` |
-| `general` | `Uint8Array` | readonly (computed) |
+| `general` | `Uint8Array` | get-only |
 | `geonet` | `number` | get/set via `setGeonet()` |
 | `geonetGlobalFlag` | `boolean` | get/set via `setGeonetGlobalFlag()` |
 | `getAccessoryOwnedCount(accessory: "WhiteFluff" | "YellowFluff" | "PinkFluff" | "BrownFluff" | "BlackFluff" | "OrangeFluff" | "RoundPebble" | "GlitterBoulder" | "SnaggyPebble" | "JaggedBoulder" | "BlackPebble" | "MiniPebble" | "PinkScale" | "BlueScale" | "GreenScale" | "PurpleScale" | "BigScale" | "NarrowScale" | "BlueFeather" | "RedFeather" | "YellowFeather" | "WhiteFeather" | "BlackMoustache" | "WhiteMoustache" | "BlackBeard" | "WhiteBeard" | "SmallLeaf" | "BigLeaf" | "NarrowLeaf" | "ShedClaw" | "ShedHorn" | "ThinMushroom" | "ThickMushroom" | "Stump" | "PrettyDewdrop" | "SnowCrystal" | "Sparks" | "ShimmeringFire" | "MysticFire" | "Determination" | "PeculiarSpoon" | "PuffySmoke" | "PoisonExtract" | "WealthyCoin" | "EerieThing" | "Spring" | "Seashell" | "HummingNote" | "ShinyPowder" | "GlitterPowder" | "RedFlower" | "PinkFlower" | "WhiteFlower" | "BlueFlower" | "OrangeFlower" | "YellowFlower" | "GooglySpecs" | "BlackSpecs" | "GorgeousSpecs" | "SweetCandy" | "Confetti" | "ColoredParasol" | "OldUmbrella" | "Spotlight" | "Cape" | "StandingMike" | "Surfboard" | "Carpet" | "RetroPipe" | "FluffyBed" | "MirrorBall" | "PhotoBoard" | "PinkBarrette" | "RedBarrette" | "BlueBarrette" | "YellowBarrette" | "GreenBarrette" | "PinkBalloon" | "RedBalloons" | "BlueBalloons" | "YellowBalloon" | "GreenBalloons" | "LaceHeadress" | "TopHat" | "SilkVeil" | "HeroicHeadband" | "ProfessorHat" | "FlowerStage" | "GoldPedestal" | "GlassStage" | "AwardPodium" | "CubeStage" | "TURTWIGMask" | "CHIMCHARMask" | "PIPLUPMask" | "BigTree" | "Flag" | "Crown" | "Tiara" | "Comet")` | `number` |  |
@@ -3196,25 +3111,25 @@ Static members:
 | `getSealCase()` | `Uint8Array` |  |
 | `getSealCount(id: "HeartA" | "HeartB" | "HeartC" | "HeartD" | "HeartE" | "HeartF" | "StarA" | "StarB" | "StarC" | "StarD" | "StarE" | "StarF" | "LineA" | "LineB" | "LineC" | "LineD" | "SmokeA" | "SmokeB" | "SmokeC" | "SmokeD" | "ElectricA" | "ElectricB" | "ElectricC" | "ElectricD" | "FoamyA" | "FoamyB" | "FoamyC" | "FoamyD" | "FireA" | "FireB" | "FireC" | "FireD" | "PartyA" | "PartyB" | "PartyC" | "PartyD" | "FloraA" | "FloraB" | "FloraC" | "FloraD" | "FloraE" | "FloraF" | "SongA" | "SongB" | "SongC" | "SongD" | "SongE" | "SongF" | "SongG" | "LetterA" | "LetterB" | "LetterC" | "LetterD" | "LetterE" | "LetterF" | "LetterG" | "LetterH" | "LetterI" | "LetterJ" | "LetterK" | "LetterL" | "LetterM" | "LetterN" | "LetterO" | "LetterP" | "LetterQ" | "LetterR" | "LetterS" | "LetterT" | "LetterU" | "LetterV" | "LetterW" | "LetterX" | "LetterY" | "LetterZ" | "Shock" | "Mystery" | "Liquid" | "MAXLEGAL" | "Burst" | "Twinkle" | "MAX")` | `number` |  |
 | `getWork(index: number)` | `number` |  |
-| `groupActive` | `Group4` | readonly (computed) |
-| `groupOther1` | `Group4` | readonly (computed) |
-| `groupOther2` | `Group4` | readonly (computed) |
-| `groupOther3` | `Group4` | readonly (computed) |
-| `groupOther4` | `Group4` | readonly (computed) |
-| `groupPlayer` | `Group4` | readonly (computed) — The game stores an array of 6 groups: [0] is the group created by the player (empty if the player has never created one) [1] is the group the player is currently in (controls swarms, Great Marsh, Feebas etc.) Unnamed default group if the player has never joined one [2] through [5] are groups created by other players, imported via record mixing. These are joinable via the group NPC |
+| `groupActive` | `Group4` | get-only |
+| `groupOther1` | `Group4` | get-only |
+| `groupOther2` | `Group4` | get-only |
+| `groupOther3` | `Group4` | get-only |
+| `groupOther4` | `Group4` | get-only |
+| `groupPlayer` | `Group4` | get-only — The game stores an array of 6 groups: [0] is the group created by the player (empty if the player has never created one) [1] is the group the player is currently in (controls swarms, Great Marsh, Feebas etc.) Unnamed default group if the player has never joined one [2] through [5] are groups created by other players, imported via record mixing. These are joinable via the group NPC |
 | `isDaycareOccupied(index: number)` | `boolean` |  |
 | `isEggAvailable` | `boolean` | get/set via `setIsEggAvailable()` |
 | `isMysteryGiftUnlocked` | `boolean` | get/set via `setIsMysteryGiftUnlocked()` |
 | `lottery` | `number` | get/set via `setLottery()` |
 | `m` | `number` | get/set via `setM()` |
 | `magic` | `number` | get/set via `setMagic()` |
-| `maxFacility` | `"Tower" \| "Factory" \| "Hall" \| "Castle" \| "Arcade"` | readonly (computed) |
-| `mystery` | `MysteryBlock4` | readonly (computed) |
+| `maxFacility` | `"Tower" \| "Factory" \| "Hall" \| "Castle" \| "Arcade"` | get-only |
+| `mystery` | `MysteryBlock4` | get-only |
 | `nationalDex` | `boolean` | get/set via `setNationalDex()` |
-| `originalTrainerTrash` | `Uint8Array` | readonly (computed) |
+| `originalTrainerTrash` | `Uint8Array` | get-only |
 | `progressFlags` | `number` | get/set via `setProgressFlags()` |
 | `romCode` | `number` | get/set via `setRomCode()` |
-| `records` | `Record4` | readonly (computed) |
+| `records` | `Record4` | get-only |
 | `region` | `number` | get/set via `setRegion()` |
 | `removeBackdrop(backdrop: "DressUp" | "Ranch" | "CityatNight" | "SnowyTown" | "Fiery" | "OuterSpace" | "Desert" | "CumulusCloud" | "FlowerPatch" | "FutureRoom" | "OpenSea" | "TotalDarkness" | "TatamiRoom" | "GingerbreadRoom" | "Seafloor" | "Underground" | "Sky" | "Theater" | "Unset")` | `void` |  |
 | `rivalName` | `string` | get/set via `setRivalName()` |
@@ -3229,7 +3144,7 @@ Static members:
 | `setWork(index: number, value: number)` | `void` |  |
 | `sprite` | `number` | get/set via `setSprite()` |
 | `swarmIndex` | `number` | get/set via `setSwarmIndex()` |
-| `swarmMaxCountModulo` | `number` | readonly (computed) |
+| `swarmMaxCountModulo` | `number` | get-only |
 | `swarmSeed` | `number` | get/set via `setSwarmSeed()` |
 | `x` | `number` | get/set via `setX()` |
 | `x2` | `number` | get/set via `setX2()` |
@@ -3252,11 +3167,11 @@ Static members:
 | Member | Type | Description |
 | --- | --- | --- |
 | `brLanguage` | `"JapaneseOrEnglish" \| "German" \| "Spanish" \| "French" \| "Italian"` | get/set via `setBrLanguage()` |
-| `battlePasses` | `BattlePassAccessor` | readonly (computed) |
+| `battlePasses` | `BattlePassAccessor` | get-only |
 | `birthDay` | `string` | get/set via `setBirthDay()` |
-| `birthDayTrash` | `Uint8Array` | readonly (computed) |
+| `birthDayTrash` | `Uint8Array` | get-only |
 | `birthMonth` | `string` | get/set via `setBirthMonth()` |
-| `birthMonthTrash` | `Uint8Array` | readonly (computed) |
+| `birthMonthTrash` | `Uint8Array` | get-only |
 | `country` | `number` | get/set via `setCountry()` |
 | `currentot` | `string` | get/set via `setCurrentot()` |
 | `currentSlot` | `number` | get/set via `setCurrentSlot()` |
@@ -3267,7 +3182,7 @@ Static members:
 | `gearShinyLucarioOutfit` | `boolean` | get/set via `setGearShinyLucarioOutfit()` |
 | `gearShinyPachirisuOutfit` | `boolean` | get/set via `setGearShinyPachirisuOutfit()` |
 | `gearShinyRoseradeOutfit` | `boolean` | get/set via `setGearShinyRoseradeOutfit()` |
-| `gearUnlock` | `GearUnlock` | readonly (computed) |
+| `gearUnlock` | `GearUnlock` | get-only |
 | `getBoxName(box: number)` | `string` |  |
 | `japanese` | `boolean` | readonly (computed) |
 | `playerid` | `bigint` | get/set via `setPlayerid()` — Used to identify which save file created a given Battle Pass. |
@@ -3288,7 +3203,7 @@ Static members:
 | `region` | `number` | get/set via `setRegion()` |
 | `saveNames` | `readonly string[]` | get/set via `setSaveNames()` |
 | `selfIntroduction` | `string` | get/set via `setSelfIntroduction()` — The self-introduction in the player's profile. |
-| `selfIntroductionTrash` | `Uint8Array` | readonly (computed) |
+| `selfIntroductionTrash` | `Uint8Array` | get-only |
 | `setBoxName(box: number, value: readonly string[])` | `void` |  |
 | `unlockedCourtyardColosseum` | `boolean` | get/set via `setUnlockedCourtyardColosseum()` |
 | `unlockedCrystalColosseum` | `boolean` | get/set via `setUnlockedCrystalColosseum()` |
@@ -3318,9 +3233,9 @@ Static members:
 
 | Member | Type | Description |
 | --- | --- | --- |
-| `roamerCresselia` | `Roamer4` | readonly (computed) |
-| `roamerMesprit` | `Roamer4` | readonly (computed) |
-| `roamerUnused` | `Roamer4` | readonly (computed) |
+| `roamerCresselia` | `Roamer4` | get-only |
+| `roamerMesprit` | `Roamer4` | get-only |
+| `roamerUnused` | `Roamer4` | get-only |
 
 Static members:
 
@@ -3347,16 +3262,16 @@ Static members:
 | `pokeGearClearAllCallers(start: number)` | `void` |  |
 | `pokeGearUnlockAllCallers()` | `void` |  |
 | `pokeGearUnlockAllCallersNoTrainers()` | `void` |  |
-| `pokeathlon` | `Pokeathlon4` | readonly (computed) |
+| `pokeathlon` | `Pokeathlon4` | get-only |
 | `pokewalkerCoursesSetAll(bitFlags: number)` | `void` |  |
 | `pokewalkerCoursesUnlockAll()` | `void` | Unlocks all Pokéwalker courses -- be nice and unlock all even if not available for the save file's language. |
 | `pokewalkerCoursesUnlockNone()` | `void` |  |
 | `pokewalkerSteps` | `number` | get/set via `setPokewalkerSteps()` |
 | `pokewalkerWatts` | `number` | get/set via `setPokewalkerWatts()` |
-| `roamerEntei` | `Roamer4` | readonly (computed) |
-| `roamerLatias` | `Roamer4` | readonly (computed) |
-| `roamerLatios` | `Roamer4` | readonly (computed) |
-| `roamerRaikou` | `Roamer4` | readonly (computed) |
+| `roamerEntei` | `Roamer4` | get-only |
+| `roamerLatias` | `Roamer4` | get-only |
+| `roamerLatios` | `Roamer4` | get-only |
+| `roamerRaikou` | `Roamer4` | get-only |
 | `setApricornCount(index: number, count: number)` | `void` |  |
 | `setBoxName(box: number, value: readonly string[])` | `void` |  |
 | `setBoxWallpaper(box: number, value: number)` | `void` |  |
@@ -3382,12 +3297,12 @@ Static members:
 | `getToughWordUnlocked(word: "EarthTones" | "Implant" | "GoldenRatio" | "Omnibus" | "Starboard" | "MoneyRate" | "Resolution" | "Cadenza" | "Education" | "Cubism" | "CrossStitch" | "Artery" | "BoneDensity" | "Gommage" | "Streaming" | "Conductivity" | "Copyright" | "TwoStep" | "Contour" | "Neutrino" | "Howling" | "Spreadsheet" | "GMT" | "Irritability" | "Fractals" | "Flambe" | "StockPrices" | "PHBalance" | "Vector" | "Polyphenol" | "Ubiquitous" | "REMSleep")` | `boolean` |  |
 | `getVillaFurniturePurchased(index: "BigSofa" | "SmallSofa" | "Bed" | "NightTable" | "TV" | "AudioSystem" | "Bookshelf" | "Rack" | "Houseplant" | "PCDesk" | "MusicBox" | "PokemonBust1" | "PokemonBust2" | "Piano" | "GuestSet" | "WallClock" | "Masterpiece" | "TeaSet" | "Chandelier")` | `boolean` |  |
 | `getWallpaperUnlocked(wallpaperId: "Forest" | "City" | "Desert" | "Savanna" | "Crag" | "Volcano" | "Snow" | "Cave" | "Beach" | "Seafloor" | "River" | "Sky" | "Checks" | "PokeCenter" | "Machine" | "Simple" | "Distortion" | "Contest" | "Nostalgic" | "Croagunk" | "trio" | "PikaPika" | "Legend" | "Team_Galactic")` | `boolean` |  |
-| `roamerArticuno` | `Roamer4` | readonly (computed) |
-| `roamerCresselia` | `Roamer4` | readonly (computed) |
-| `roamerMesprit` | `Roamer4` | readonly (computed) |
-| `roamerMoltres` | `Roamer4` | readonly (computed) |
-| `roamerUnused` | `Roamer4` | readonly (computed) |
-| `roamerZapdos` | `Roamer4` | readonly (computed) |
+| `roamerArticuno` | `Roamer4` | get-only |
+| `roamerCresselia` | `Roamer4` | get-only |
+| `roamerMesprit` | `Roamer4` | get-only |
+| `roamerMoltres` | `Roamer4` | get-only |
+| `roamerUnused` | `Roamer4` | get-only |
+| `roamerZapdos` | `Roamer4` | get-only |
 | `setToughWordUnlocked(word: "EarthTones" | "Implant" | "GoldenRatio" | "Omnibus" | "Starboard" | "MoneyRate" | "Resolution" | "Cadenza" | "Education" | "Cubism" | "CrossStitch" | "Artery" | "BoneDensity" | "Gommage" | "Streaming" | "Conductivity" | "Copyright" | "TwoStep" | "Contour" | "Neutrino" | "Howling" | "Spreadsheet" | "GMT" | "Irritability" | "Fractals" | "Flambe" | "StockPrices" | "PHBalance" | "Vector" | "Polyphenol" | "Ubiquitous" | "REMSleep", value: boolean)` | `void` |  |
 | `setVillaFurniturePurchased(index: "BigSofa" | "SmallSofa" | "Bed" | "NightTable" | "TV" | "AudioSystem" | "Bookshelf" | "Rack" | "Houseplant" | "PCDesk" | "MusicBox" | "PokemonBust1" | "PokemonBust2" | "Piano" | "GuestSet" | "WallClock" | "Masterpiece" | "TeaSet" | "Chandelier", value: boolean)` | `void` |  |
 | `setWallpaperUnlocked(wallpaperId: "Forest" | "City" | "Desert" | "Savanna" | "Crag" | "Volcano" | "Snow" | "Cave" | "Beach" | "Seafloor" | "River" | "Sky" | "Checks" | "PokeCenter" | "Machine" | "Simple" | "Distortion" | "Contest" | "Nostalgic" | "Croagunk" | "trio" | "PikaPika" | "Legend" | "Team_Galactic", value: boolean)` | `void` |  |
@@ -3408,20 +3323,20 @@ Static members:
 | `getRanchMii(index: number)` | `RanchMii` |  |
 | `getRanchToy(index: number)` | `RanchToy` |  |
 | `getRanchTrainerMii(index: number)` | `RanchTrainerMii` |  |
-| `maxMiiCount` | `number` | readonly (computed) |
-| `maxToyCount` | `number` | readonly (computed) |
-| `maxToyid` | `number` | readonly (computed) |
-| `miiCount` | `number` | readonly (computed) |
+| `maxMiiCount` | `number` | get-only |
+| `maxToyCount` | `number` | get-only |
+| `maxToyid` | `number` | get-only |
+| `miiCount` | `number` | get-only |
 | `nextHayleyBringNationalDex` | `number` | get/set via `setNextHayleyBringNationalDex()` |
 | `plannedRanchLevel` | `number` | get/set via `setPlannedRanchLevel()` |
-| `saveRevision` | `number` | readonly (computed) |
-| `saveRevisionString` | `string` | readonly (computed) |
+| `saveRevision` | `number` | get-only |
+| `saveRevisionString` | `string` | get-only |
 | `secondsSince2000` | `number` | get/set via `setSecondsSince2000()` |
 | `setRanchMii(trainer: RanchMii, index: number)` | `void` |  |
 | `setRanchToy(toy: RanchToy, index: number)` | `void` |  |
 | `setRanchTrainerMii(mii: RanchTrainerMii, index: number)` | `void` |  |
 | `totalSeconds` | `number` | get/set via `setTotalSeconds()` |
-| `trainerMiiCount` | `number` | readonly (computed) |
+| `trainerMiiCount` | `number` | get-only |
 | `writeBoxSlotInternal(pk: PKM, data: Uint8Array, htName: string, htTID: number, htSID: number, type: "None" | "Trainer" | "Hayley" | "Hayley_Traded")` | `void` |  |
 
 ### `SAV4Sinnoh`
@@ -3485,28 +3400,28 @@ Static members:
 
 | Member | Type | Description |
 | --- | --- | --- |
-| `adventureInfo` | `AdventureInfo5` | readonly (computed) |
-| `allBlocks` | `readonly BlockInfo[]` | readonly (computed) |
-| `battleBox` | `BattleBox5` | readonly (computed) |
-| `battleSubway` | `BattleSubway5` | readonly (computed) |
-| `battleSubwayPlay` | `BattleSubwayPlay5` | readonly (computed) |
-| `battleTest` | `Uint8Array` | readonly (computed) |
-| `battleVideoDownload1` | `Uint8Array` | readonly (computed) |
-| `battleVideoDownload2` | `Uint8Array` | readonly (computed) |
-| `battleVideoDownload3` | `Uint8Array` | readonly (computed) |
-| `battleVideoNative` | `Uint8Array` | readonly (computed) |
-| `boxLayout` | `BoxLayout5` | readonly (computed) |
-| `cgearSkinData` | `Uint8Array` | readonly (computed) |
-| `chatter` | `Chatter5` | readonly (computed) |
+| `adventureInfo` | `AdventureInfo5` | get-only |
+| `allBlocks` | `readonly BlockInfo[]` | get-only |
+| `battleBox` | `BattleBox5` | get-only |
+| `battleSubway` | `BattleSubway5` | get-only |
+| `battleSubwayPlay` | `BattleSubwayPlay5` | get-only |
+| `battleTest` | `Uint8Array` | get-only |
+| `battleVideoDownload1` | `Uint8Array` | get-only |
+| `battleVideoDownload2` | `Uint8Array` | get-only |
+| `battleVideoDownload3` | `Uint8Array` | get-only |
+| `battleVideoNative` | `Uint8Array` | get-only |
+| `boxLayout` | `BoxLayout5` | get-only |
+| `cgearSkinData` | `Uint8Array` | get-only |
+| `chatter` | `Chatter5` | get-only |
 | `country` | `number` | get/set via `setCountry()` |
-| `daycare` | `Daycare5` | readonly (computed) |
-| `daycareSlotCount` | `number` | readonly (computed) |
-| `encount` | `Encount5` | readonly (computed) |
-| `entralink` | `Entralink5` | readonly (computed) |
-| `entreeForest` | `EntreeForest` | readonly (computed) |
-| `eventWork` | `EventWork5` | readonly (computed) |
-| `forest` | `WhiteBlack5` | readonly (computed) |
-| `gts` | `GTS5` | readonly (computed) |
+| `daycare` | `Daycare5` | get-only |
+| `daycareSlotCount` | `number` | get-only |
+| `encount` | `Encount5` | get-only |
+| `entralink` | `Entralink5` | get-only |
+| `entreeForest` | `EntreeForest` | get-only |
+| `eventWork` | `EventWork5` | get-only |
+| `forest` | `WhiteBlack5` | get-only |
+| `gts` | `GTS5` | get-only |
 | `getBattleVideo(index: number)` | `Uint8Array` |  |
 | `getBoxName(box: number)` | `string` |  |
 | `getBoxWallpaper(box: number)` | `number` |  |
@@ -3514,24 +3429,24 @@ Static members:
 | `getDaycareSlot(slot: number)` | `Uint8Array` |  |
 | `getMail(mailIndex: number)` | `MailDetail` |  |
 | `getMailData(offset: number)` | `Uint8Array` |  |
-| `globalLink` | `GlobalLink5` | readonly (computed) |
-| `hallOfFame1` | `Uint8Array` | readonly (computed) |
-| `hallOfFame2` | `Uint8Array` | readonly (computed) |
+| `globalLink` | `GlobalLink5` | get-only |
+| `hallOfFame1` | `Uint8Array` | get-only |
+| `hallOfFame2` | `Uint8Array` | get-only |
 | `isAvailablePokedexSkin` | `boolean` | get/set via `setIsAvailablePokedexSkin()` |
 | `isDaycareOccupied(slot: number)` | `boolean` |  |
 | `isEggAvailable` | `boolean` | get/set via `setIsEggAvailable()` |
-| `items` | `MyItem` | readonly (computed) |
-| `link1Data` | `Uint8Array` | readonly (computed) |
-| `link2Data` | `Uint8Array` | readonly (computed) |
-| `misc` | `Misc5` | readonly (computed) |
-| `musical` | `Musical5` | readonly (computed) |
-| `musicalDownloadData` | `Uint8Array` | readonly (computed) |
-| `musicalDownloadSize` | `number` | readonly (computed) — Variable sized NARC download depending on the game (B/W vs B2/W2). |
-| `mystery` | `MysteryBlock5` | readonly (computed) |
-| `playerData` | `PlayerData5` | readonly (computed) |
-| `playerPosition` | `PlayerPosition5` | readonly (computed) |
-| `pokedexSkinData` | `Uint8Array` | readonly (computed) |
-| `records` | `Record5` | readonly (computed) |
+| `items` | `MyItem` | get-only |
+| `link1Data` | `Uint8Array` | get-only |
+| `link2Data` | `Uint8Array` | get-only |
+| `misc` | `Misc5` | get-only |
+| `musical` | `Musical5` | get-only |
+| `musicalDownloadData` | `Uint8Array` | get-only |
+| `musicalDownloadSize` | `number` | get-only — Variable sized NARC download depending on the game (B/W vs B2/W2). |
+| `mystery` | `MysteryBlock5` | get-only |
+| `playerData` | `PlayerData5` | get-only |
+| `playerPosition` | `PlayerPosition5` | get-only |
+| `pokedexSkinData` | `Uint8Array` | get-only |
+| `records` | `Record5` | get-only |
 | `region` | `number` | get/set via `setRegion()` |
 | `setBattleTest(data: Uint8Array, count: number)` | `void` |  |
 | `setBattleVideo(index: number, data: Uint8Array, count: number)` | `void` |  |
@@ -3545,9 +3460,9 @@ Static members:
 | `setLink2Data(data: Uint8Array)` | `void` |  |
 | `setMusical(data: Uint8Array, count: number)` | `void` |  |
 | `setPokeDexSkin(data: Uint8Array, count: number)` | `void` |  |
-| `skinInfo` | `SkinInfo5` | readonly (computed) |
-| `unityTower` | `UnityTower5` | readonly (computed) |
-| `zukan` | `Zukan5` | readonly (computed) |
+| `skinInfo` | `SkinInfo5` | get-only |
+| `unityTower` | `UnityTower5` | get-only |
+| `zukan` | `Zukan5` | get-only |
 
 Static members:
 
@@ -3562,15 +3477,15 @@ Static members:
 
 | Member | Type | Description |
 | --- | --- | --- |
-| `blocks` | `SaveBlockAccessor5B2W2` | readonly (computed) |
-| `festa` | `FestaBlock5` | readonly (computed) |
+| `blocks` | `SaveBlockAccessor5B2W2` | get-only |
+| `festa` | `FestaBlock5` | get-only |
 | `getKeyData()` | `Uint8Array` |  |
 | `getpwt(index: number)` | `Uint8Array` |  |
 | `getPokestarMovie(index: number)` | `Uint8Array` |  |
-| `joinAvenue` | `JoinAvenue5` | readonly (computed) |
-| `keys` | `KeySystem5` | readonly (computed) |
-| `medals` | `MedalList5` | readonly (computed) |
-| `pwt` | `PWTBlock5` | readonly (computed) |
+| `joinAvenue` | `JoinAvenue5` | get-only |
+| `keys` | `KeySystem5` | get-only |
+| `medals` | `MedalList5` | get-only |
+| `pwt` | `PWTBlock5` | get-only |
 | `rivalName` | `string` | get/set via `setRivalName()` |
 | `rivalNameTrash` | `Uint8Array` | get/set via `setRivalNameTrash()` |
 | `setKeyData(data: Uint8Array, count: number)` | `void` |  |
@@ -3599,7 +3514,7 @@ Static members:
 
 | Member | Type | Description |
 | --- | --- | --- |
-| `blocks` | `SaveBlockAccessor5BW` | readonly (computed) |
+| `blocks` | `SaveBlockAccessor5BW` | get-only |
 
 ### `SAV6`
 
@@ -3611,27 +3526,27 @@ Static members:
 | `badges` | `number` | get/set via `setBadges()` |
 | `consoleRegion` | `number` | get/set via `setConsoleRegion()` |
 | `country` | `number` | get/set via `setCountry()` |
-| `eventWork` | `EventWork6` | readonly (computed) |
+| `eventWork` | `EventWork6` | get-only |
 | `gameSyncid` | `string` | get/set via `setGameSyncid()` |
-| `gameSyncidSize` | `number` | readonly (computed) |
-| `gameTime` | `GameTime6` | readonly (computed) |
+| `gameSyncidSize` | `number` | get-only |
+| `gameTime` | `GameTime6` | get-only |
 | `getjpegData()` | `Uint8Array` |  |
 | `getRecord(recordID: number)` | `number` |  |
 | `getRecordMax(recordID: number)` | `number` |  |
 | `getRecordOffset(recordID: number)` | `number` |  |
 | `hof` | `number` | get/set via `setHof()` |
-| `itemInfo` | `ItemInfo6` | readonly (computed) |
-| `items` | `MyItem` | readonly (computed) |
-| `jpegTitle` | `string` | readonly (computed) |
-| `overworld` | `FieldMoveModelSave6` | readonly (computed) |
+| `itemInfo` | `ItemInfo6` | get-only |
+| `items` | `MyItem` | get-only |
+| `jpegTitle` | `string` | get-only |
+| `overworld` | `FieldMoveModelSave6` | get-only |
 | `pss` | `number` | get/set via `setPss()` |
-| `played` | `PlayTime6` | readonly (computed) |
-| `recordCount` | `number` | readonly (computed) |
-| `records` | `RecordBlock6` | readonly (computed) |
+| `played` | `PlayTime6` | get-only |
+| `recordCount` | `number` | get-only |
+| `records` | `RecordBlock6` | get-only |
 | `region` | `number` | get/set via `setRegion()` |
 | `setRecord(recordID: number, value: number)` | `void` |  |
-| `situation` | `Situation6` | readonly (computed) |
-| `status` | `MyStatus6` | readonly (computed) |
+| `situation` | `Situation6` | get-only |
+| `status` | `MyStatus6` | get-only |
 | `vivillon` | `number` | get/set via `setVivillon()` |
 
 ### `SAV6AO`
@@ -3640,33 +3555,33 @@ Static members:
 
 | Member | Type | Description |
 | --- | --- | --- |
-| `battleBox` | `BattleBox6` | readonly (computed) |
+| `battleBox` | `BattleBox6` | get-only |
 | `battleBoxLocked` | `boolean` | get/set via `setBattleBoxLocked()` |
-| `berryField` | `BerryField6AO` | readonly (computed) |
-| `blocks` | `SaveBlockAccessor6AO` | readonly (computed) |
-| `boxLayout` | `BoxLayout6` | readonly (computed) |
-| `config` | `ConfigSave6` | readonly (computed) |
-| `contest` | `Contest6` | readonly (computed) |
-| `daycareCount` | `number` | readonly (computed) |
-| `encount` | `Encount6` | readonly (computed) |
-| `fused` | `UnionPokemon6` | readonly (computed) |
-| `gts` | `GTS6` | readonly (computed) |
+| `berryField` | `BerryField6AO` | get-only |
+| `blocks` | `SaveBlockAccessor6AO` | get-only |
+| `boxLayout` | `BoxLayout6` | get-only |
+| `config` | `ConfigSave6` | get-only |
+| `contest` | `Contest6` | get-only |
+| `daycareCount` | `number` | get-only |
+| `encount` | `Encount6` | get-only |
+| `fused` | `UnionPokemon6` | get-only |
+| `gts` | `GTS6` | get-only |
 | `getBoxName(box: number)` | `string` |  |
 | `getBoxWallpaper(box: number)` | `number` |  |
-| `hallOfFame` | `HallOfFame6` | readonly (computed) |
-| `link` | `LinkBlock6` | readonly (computed) |
-| `maison` | `MaisonBlock` | readonly (computed) |
-| `misc` | `Misc6AO` | readonly (computed) |
+| `hallOfFame` | `HallOfFame6` | get-only |
+| `link` | `LinkBlock6` | get-only |
+| `maison` | `MaisonBlock` | get-only |
+| `misc` | `Misc6AO` | get-only |
 | `multiplayerSpriteid` | `number` | get/set via `setMultiplayerSpriteid()` |
-| `mysteryGift` | `MysteryBlock6` | readonly (computed) |
-| `opower` | `OPower6` | readonly (computed) |
-| `puff` | `Puff6` | readonly (computed) |
-| `sube` | `SubEventLog6AO` | readonly (computed) |
-| `secretBase` | `SecretBase6Block` | readonly (computed) |
+| `mysteryGift` | `MysteryBlock6` | get-only |
+| `opower` | `OPower6` | get-only |
+| `puff` | `Puff6` | get-only |
+| `sube` | `SubEventLog6AO` | get-only |
+| `secretBase` | `SecretBase6Block` | get-only |
 | `setBoxName(box: number, name: readonly string[])` | `void` |  |
 | `setBoxWallpaper(box: number, wallpaper: number)` | `void` |  |
-| `superTrain` | `SuperTrainBlock` | readonly (computed) |
-| `zukan` | `Zukan6AO` | readonly (computed) |
+| `superTrain` | `SuperTrainBlock` | get-only |
+| `zukan` | `Zukan6AO` | get-only |
 
 ### `SAV6AODemo`
 
@@ -3674,7 +3589,7 @@ Static members:
 
 | Member | Type | Description |
 | --- | --- | --- |
-| `blocks` | `SaveBlockAccessor6AODemo` | readonly (computed) |
+| `blocks` | `SaveBlockAccessor6AODemo` | get-only |
 
 ### `SAV6XY`
 
@@ -3682,39 +3597,39 @@ Static members:
 
 | Member | Type | Description |
 | --- | --- | --- |
-| `battleBox` | `BattleBox6` | readonly (computed) |
+| `battleBox` | `BattleBox6` | get-only |
 | `battleBoxLocked` | `boolean` | get/set via `setBattleBoxLocked()` |
-| `berryField` | `BerryField6XY` | readonly (computed) |
-| `blocks` | `SaveBlockAccessor6XY` | readonly (computed) |
-| `boxLayout` | `BoxLayout6` | readonly (computed) |
-| `config` | `ConfigSave6` | readonly (computed) |
-| `daycareSlotCount` | `number` | readonly (computed) |
-| `encount` | `Encount6` | readonly (computed) |
-| `fashion` | `Fashion6XY` | readonly (computed) |
-| `fused` | `UnionPokemon6` | readonly (computed) |
-| `gts` | `GTS6` | readonly (computed) |
+| `berryField` | `BerryField6XY` | get-only |
+| `blocks` | `SaveBlockAccessor6XY` | get-only |
+| `boxLayout` | `BoxLayout6` | get-only |
+| `config` | `ConfigSave6` | get-only |
+| `daycareSlotCount` | `number` | get-only |
+| `encount` | `Encount6` | get-only |
+| `fashion` | `Fashion6XY` | get-only |
+| `fused` | `UnionPokemon6` | get-only |
+| `gts` | `GTS6` | get-only |
 | `getBoxName(box: number)` | `string` |  |
 | `getBoxWallpaper(box: number)` | `number` |  |
 | `getDaycareexp(index: number)` | `number` |  |
 | `getDaycareSlot(index: number)` | `Uint8Array` |  |
-| `hallOfFame` | `HallOfFame6` | readonly (computed) |
+| `hallOfFame` | `HallOfFame6` | get-only |
 | `isDaycareOccupied(index: number)` | `boolean` |  |
 | `isEggAvailable` | `boolean` | get/set via `setIsEggAvailable()` |
-| `link` | `LinkBlock6` | readonly (computed) |
-| `maison` | `MaisonBlock` | readonly (computed) |
-| `misc` | `Misc6XY` | readonly (computed) |
+| `link` | `LinkBlock6` | get-only |
+| `maison` | `MaisonBlock` | get-only |
+| `misc` | `Misc6XY` | get-only |
 | `multiplayerSpriteid` | `number` | get/set via `setMultiplayerSpriteid()` |
-| `mysteryGift` | `MysteryBlock6` | readonly (computed) |
-| `opower` | `OPower6` | readonly (computed) |
-| `puff` | `Puff6` | readonly (computed) |
-| `sube` | `SubEventLog6XY` | readonly (computed) |
+| `mysteryGift` | `MysteryBlock6` | get-only |
+| `opower` | `OPower6` | get-only |
+| `puff` | `Puff6` | get-only |
+| `sube` | `SubEventLog6XY` | get-only |
 | `setBoxName(box: number, name: readonly string[])` | `void` |  |
 | `setBoxWallpaper(box: number, wallpaper: number)` | `void` |  |
 | `setDaycareexp(index: number, exp: number)` | `void` |  |
 | `setDaycareOccupied(index: number, occupied: boolean)` | `void` |  |
-| `superTrain` | `SuperTrainBlock` | readonly (computed) |
+| `superTrain` | `SuperTrainBlock` | get-only |
 | `unlockAllFriendSafariSlots()` | `void` |  |
-| `zukan` | `Zukan6XY` | readonly (computed) |
+| `zukan` | `Zukan6XY` | get-only |
 
 ### `SAV7`
 
@@ -3722,22 +3637,22 @@ Static members:
 
 | Member | Type | Description |
 | --- | --- | --- |
-| `battleTree` | `BattleTree7` | readonly (computed) |
-| `boxLayout` | `BoxLayout7` | readonly (computed) |
-| `config` | `ConfigSave7` | readonly (computed) |
+| `battleTree` | `BattleTree7` | get-only |
+| `boxLayout` | `BoxLayout7` | get-only |
+| `config` | `ConfigSave7` | get-only |
 | `consoleRegion` | `number` | get/set via `setConsoleRegion()` |
 | `country` | `number` | get/set via `setCountry()` |
-| `daycare` | `Daycare7` | readonly (computed) |
-| `daycareSlotCount` | `number` | readonly (computed) |
-| `eventWork` | `EventWork7` | readonly (computed) |
-| `fashion` | `FashionBlock7` | readonly (computed) |
-| `festa` | `JoinFesta7` | readonly (computed) |
-| `fieldMenu` | `FieldMenu7` | readonly (computed) |
-| `fused` | `UnionPokemon7` | readonly (computed) |
-| `gts` | `GTS7` | readonly (computed) |
+| `daycare` | `Daycare7` | get-only |
+| `daycareSlotCount` | `number` | get-only |
+| `eventWork` | `EventWork7` | get-only |
+| `fashion` | `FashionBlock7` | get-only |
+| `festa` | `JoinFesta7` | get-only |
+| `fieldMenu` | `FieldMenu7` | get-only |
+| `fused` | `UnionPokemon7` | get-only |
+| `gts` | `GTS7` | get-only |
 | `gameSyncid` | `string` | get/set via `setGameSyncid()` |
-| `gameSyncidSize` | `number` | readonly (computed) |
-| `gameTime` | `GameTime7` | readonly (computed) |
+| `gameSyncidSize` | `number` | get-only |
+| `gameTime` | `GameTime7` | get-only |
 | `getBoxName(box: number)` | `string` |  |
 | `getBoxWallpaper(box: number)` | `number` |  |
 | `getDaycareSlot(index: number)` | `Uint8Array` |  |
@@ -3747,25 +3662,25 @@ Static members:
 | `getRecordOffset(recordID: number)` | `number` |  |
 | `isDaycareOccupied(index: number)` | `boolean` |  |
 | `isEggAvailable` | `boolean` | get/set via `setIsEggAvailable()` |
-| `items` | `MyItem` | readonly (computed) |
-| `misc` | `Misc7` | readonly (computed) |
+| `items` | `MyItem` | get-only |
+| `misc` | `Misc7` | get-only |
 | `multiplayerSpriteid` | `number` | get/set via `setMultiplayerSpriteid()` |
-| `myStatus` | `MyStatus7` | readonly (computed) |
-| `mysteryGift` | `MysteryBlock7` | readonly (computed) |
-| `overworld` | `FieldMoveModelSave7` | readonly (computed) |
-| `played` | `PlayTime6` | readonly (computed) |
-| `pokeFinder` | `PokeFinder7` | readonly (computed) |
-| `recordCount` | `number` | readonly (computed) |
-| `records` | `RecordBlock6` | readonly (computed) |
+| `myStatus` | `MyStatus7` | get-only |
+| `mysteryGift` | `MysteryBlock7` | get-only |
+| `overworld` | `FieldMoveModelSave7` | get-only |
+| `played` | `PlayTime6` | get-only |
+| `pokeFinder` | `PokeFinder7` | get-only |
+| `recordCount` | `number` | get-only |
+| `records` | `RecordBlock6` | get-only |
 | `region` | `number` | get/set via `setRegion()` |
-| `resortSave` | `ResortSave7` | readonly (computed) |
+| `resortSave` | `ResortSave7` | get-only |
 | `setBoxName(box: number, value: readonly string[])` | `void` |  |
 | `setBoxWallpaper(box: number, value: number)` | `void` |  |
 | `setDaycareOccupied(index: number, occupied: boolean)` | `void` |  |
 | `setRecord(recordID: number, value: number)` | `void` |  |
-| `situation` | `Situation7` | readonly (computed) |
+| `situation` | `Situation7` | get-only |
 | `updateQrConstants()` | `void` |  |
-| `zukan` | `Zukan7` | readonly (computed) |
+| `zukan` | `Zukan7` | get-only |
 
 ### `SAV7SM`
 
@@ -3773,7 +3688,7 @@ Static members:
 
 | Member | Type | Description |
 | --- | --- | --- |
-| `blocks` | `SaveBlockAccessor7SM` | readonly (computed) |
+| `blocks` | `SaveBlockAccessor7SM` | get-only |
 
 ### `SAV7USUM`
 
@@ -3781,8 +3696,8 @@ Static members:
 
 | Member | Type | Description |
 | --- | --- | --- |
-| `battleAgency` | `BattleAgency7` | readonly (computed) |
-| `blocks` | `SaveBlockAccessor7USUM` | readonly (computed) |
+| `battleAgency` | `BattleAgency7` | get-only |
+| `blocks` | `SaveBlockAccessor7USUM` | get-only |
 
 ### `SAV7b`
 
@@ -3790,24 +3705,24 @@ Static members:
 
 | Member | Type | Description |
 | --- | --- | --- |
-| `blocks` | `SaveBlockAccessor7b` | readonly (computed) |
-| `captured` | `CaptureRecords` | readonly (computed) |
-| `config` | `ConfigSave7b` | readonly (computed) |
-| `coordinates` | `Coordinates7b` | readonly (computed) |
-| `daycare` | `Daycare7b` | readonly (computed) |
-| `eventWork` | `EventWork7b` | readonly (computed) |
+| `blocks` | `SaveBlockAccessor7b` | get-only |
+| `captured` | `CaptureRecords` | get-only |
+| `config` | `ConfigSave7b` | get-only |
+| `coordinates` | `Coordinates7b` | get-only |
+| `daycare` | `Daycare7b` | get-only |
+| `eventWork` | `EventWork7b` | get-only |
 | `fixStoragePreWrite()` | `boolean` |  |
 | `gameSyncid` | `string` | get/set via `setGameSyncid()` |
-| `gameSyncidSize` | `number` | readonly (computed) |
-| `giftRecords` | `WB7Records` | readonly (computed) |
-| `items` | `MyItem7b` | readonly (computed) |
-| `misc` | `Misc7b` | readonly (computed) |
-| `park` | `GoParkStorage` | readonly (computed) |
-| `played` | `PlayTime7b` | readonly (computed) |
-| `playerGeoLocation` | `PlayerGeoLocation7b` | readonly (computed) |
-| `status` | `MyStatus7b` | readonly (computed) |
-| `storage` | `PokeListHeader` | readonly (computed) |
-| `zukan` | `Zukan7b` | readonly (computed) |
+| `gameSyncidSize` | `number` | get-only |
+| `giftRecords` | `WB7Records` | get-only |
+| `items` | `MyItem7b` | get-only |
+| `misc` | `Misc7b` | get-only |
+| `park` | `GoParkStorage` | get-only |
+| `played` | `PlayTime7b` | get-only |
+| `playerGeoLocation` | `PlayerGeoLocation7b` | get-only |
+| `status` | `MyStatus7b` | get-only |
+| `storage` | `PokeListHeader` | get-only |
+| `zukan` | `Zukan7b` | get-only |
 
 ### `SAV8BS`
 
@@ -3815,20 +3730,20 @@ Static members:
 
 | Member | Type | Description |
 | --- | --- | --- |
-| `battleTower` | `BattleTowerWork8b` | readonly (computed) |
-| `battleTrainer` | `BattleTrainerStatus8b` | readonly (computed) |
-| `berryTrees` | `BerryTreeGrowSave8b` | readonly (computed) |
-| `boxLayout` | `BoxLayout8b` | readonly (computed) |
-| `config` | `ConfigSave8b` | readonly (computed) |
-| `contest` | `Contest8b` | readonly (computed) |
-| `contestPhotoLanguage` | `ContestPhotoLanguage8b` | readonly (computed) |
-| `daycare` | `Daycare8b` | readonly (computed) |
-| `daycareSlotCount` | `number` | readonly (computed) |
-| `encounter` | `EncounterSave8b` | readonly (computed) |
-| `eventWorkCount` | `number` | readonly (computed) |
-| `fieldGimmick` | `FieldGimmickSave8b` | readonly (computed) |
-| `fieldObjects` | `FieldObjectSave8b` | readonly (computed) |
-| `flagWork` | `FlagWork8b` | readonly (computed) |
+| `battleTower` | `BattleTowerWork8b` | get-only |
+| `battleTrainer` | `BattleTrainerStatus8b` | get-only |
+| `berryTrees` | `BerryTreeGrowSave8b` | get-only |
+| `boxLayout` | `BoxLayout8b` | get-only |
+| `config` | `ConfigSave8b` | get-only |
+| `contest` | `Contest8b` | get-only |
+| `contestPhotoLanguage` | `ContestPhotoLanguage8b` | get-only |
+| `daycare` | `Daycare8b` | get-only |
+| `daycareSlotCount` | `number` | get-only |
+| `encounter` | `EncounterSave8b` | get-only |
+| `eventWorkCount` | `number` | get-only |
+| `fieldGimmick` | `FieldGimmickSave8b` | get-only |
+| `fieldObjects` | `FieldObjectSave8b` | get-only |
+| `flagWork` | `FlagWork8b` | get-only |
 | `getBoxName(box: number)` | `string` |  |
 | `getBoxWallpaper(box: number)` | `number` |  |
 | `getDaycareSlot(index: number)` | `Uint8Array` |  |
@@ -3836,45 +3751,45 @@ Static members:
 | `getRecordMax(recordID: number)` | `number` |  |
 | `getRecordOffset(recordID: number)` | `number` |  |
 | `getWork(index: number)` | `number` |  |
-| `hasFirstSaveFileExpansion` | `boolean` | readonly (computed) |
-| `hasSecondSaveFileExpansion` | `boolean` | readonly (computed) |
+| `hasFirstSaveFileExpansion` | `boolean` | get-only |
+| `hasSecondSaveFileExpansion` | `boolean` | get-only |
 | `isDaycareOccupied(slot: number)` | `boolean` |  |
 | `isEggAvailable` | `boolean` | get/set via `setIsEggAvailable()` |
-| `items` | `MyItem8b` | readonly (computed) |
-| `menuSelection` | `MenuSelect8b` | readonly (computed) |
-| `myStatus` | `MyStatus8b` | readonly (computed) |
-| `mysteryRecords` | `MysteryBlock8b` | readonly (computed) |
-| `partyInfo` | `Party8b` | readonly (computed) |
-| `played` | `PlayTime8b` | readonly (computed) |
-| `player` | `PlayerData8b` | readonly (computed) |
-| `poffins` | `PoffinSaveData8b` | readonly (computed) |
-| `poketch` | `Poketch8b` | readonly (computed) |
-| `random` | `RandomGroup8b` | readonly (computed) |
-| `recordAdd` | `RecordAddData8b` | readonly (computed) |
-| `recordCount` | `number` | readonly (computed) |
-| `records` | `Record8b` | readonly (computed) |
+| `items` | `MyItem8b` | get-only |
+| `menuSelection` | `MenuSelect8b` | get-only |
+| `myStatus` | `MyStatus8b` | get-only |
+| `mysteryRecords` | `MysteryBlock8b` | get-only |
+| `partyInfo` | `Party8b` | get-only |
+| `played` | `PlayTime8b` | get-only |
+| `player` | `PlayerData8b` | get-only |
+| `poffins` | `PoffinSaveData8b` | get-only |
+| `poketch` | `Poketch8b` | get-only |
+| `random` | `RandomGroup8b` | get-only |
+| `recordAdd` | `RecordAddData8b` | get-only |
+| `recordCount` | `number` | get-only |
+| `records` | `Record8b` | get-only |
 | `rivalName` | `string` | get/set via `setRivalName()` |
-| `rivalNameTrash` | `Uint8Array` | readonly (computed) |
+| `rivalNameTrash` | `Uint8Array` | get-only |
 | `saveRevision` | `number` | get/set via `setSaveRevision()` |
-| `saveRevisionString` | `string` | readonly (computed) |
-| `sealDeco` | `SealBallDecoData8b` | readonly (computed) |
-| `sealList` | `SealList8b` | readonly (computed) |
-| `selectBoundItems` | `SaveItemShortcut8b` | readonly (computed) |
+| `saveRevisionString` | `string` | get-only |
+| `sealDeco` | `SealBallDecoData8b` | get-only |
+| `sealList` | `SealList8b` | get-only |
+| `selectBoundItems` | `SaveItemShortcut8b` | get-only |
 | `setBoxName(box: number, value: readonly string[])` | `void` |  |
 | `setBoxWallpaper(box: number, value: number)` | `void` |  |
 | `setDaycareOccupied(slot: number, occupied: boolean)` | `void` |  |
 | `setRecord(recordID: number, value: number)` | `void` |  |
 | `setWork(index: number, value: number)` | `void` |  |
-| `system` | `SystemData8b` | readonly (computed) |
+| `system` | `SystemData8b` | get-only |
 | `timeScale` | `number` | get/set via `setTimeScale()` |
-| `ugCount` | `UgCountRecord8b` | readonly (computed) |
-| `ugSaveData` | `UgSaveData8b` | readonly (computed) |
-| `underground` | `UndergroundItemList8b` | readonly (computed) |
+| `ugCount` | `UgCountRecord8b` | get-only |
+| `ugSaveData` | `UgSaveData8b` | get-only |
+| `underground` | `UndergroundItemList8b` | get-only |
 | `unionRoomPenaltyTime` | `number` | get/set via `setUnionRoomPenaltyTime()` |
-| `unionSave` | `UnionSaveData8b` | readonly (computed) |
+| `unionSave` | `UnionSaveData8b` | get-only |
 | `zoneid` | `number` | get/set via `setZoneid()` |
-| `zukan` | `Zukan8b` | readonly (computed) |
-| `zukanExtra` | `ZukanSpinda8b` | readonly (computed) |
+| `zukan` | `Zukan8b` | get-only |
+| `zukanExtra` | `ZukanSpinda8b` | get-only |
 
 ### `SAV8LA`
 
@@ -3882,25 +3797,25 @@ Static members:
 
 | Member | Type | Description |
 | --- | --- | --- |
-| `accessor` | `SCBlockAccessor` | readonly (computed) |
-| `adventureStart` | `Epoch1970Value` | readonly (computed) |
-| `allBlocks` | `readonly SCBlock[]` | readonly (computed) |
-| `areaSpawners` | `AreaSpawnerSet8a` | readonly (computed) |
-| `blocks` | `SaveBlockAccessor8LA` | readonly (computed) |
-| `boxInfo` | `Box8` | readonly (computed) |
-| `boxLayout` | `BoxLayout8a` | readonly (computed) |
-| `coordinates` | `Coordinates8a` | readonly (computed) |
+| `accessor` | `SCBlockAccessor` | get-only |
+| `adventureStart` | `Epoch1970Value` | get-only |
+| `allBlocks` | `readonly SCBlock[]` | get-only |
+| `areaSpawners` | `AreaSpawnerSet8a` | get-only |
+| `blocks` | `SaveBlockAccessor8LA` | get-only |
+| `boxInfo` | `Box8` | get-only |
+| `boxLayout` | `BoxLayout8a` | get-only |
+| `coordinates` | `Coordinates8a` | get-only |
 | `getBoxName(box: number)` | `string` |  |
 | `getBoxWallpaper(box: number)` | `number` |  |
 | `getValue(key: number)` | `T` |  |
-| `items` | `MyItem8a` | readonly (computed) |
-| `lastSaved` | `Epoch1900DateTimeValue` | readonly (computed) |
-| `myStatus` | `MyStatus8a` | readonly (computed) |
-| `partyInfo` | `Party8a` | readonly (computed) |
-| `played` | `PlayTime8b` | readonly (computed) |
-| `pokedexSave` | `PokedexSave8a` | readonly (computed) |
-| `saveRevision` | `number` | readonly (computed) |
-| `saveRevisionString` | `string` | readonly (computed) |
+| `items` | `MyItem8a` | get-only |
+| `lastSaved` | `Epoch1900DateTimeValue` | get-only |
+| `myStatus` | `MyStatus8a` | get-only |
+| `partyInfo` | `Party8a` | get-only |
+| `played` | `PlayTime8b` | get-only |
+| `pokedexSave` | `PokedexSave8a` | get-only |
+| `saveRevision` | `number` | get-only |
+| `saveRevisionString` | `string` | get-only |
 | `setBoxName(box: number, value: readonly string[])` | `void` |  |
 | `setBoxWallpaper(box: number, value: number)` | `void` |  |
 | `setValue(key: number, value: T)` | `void` |  |
@@ -3911,43 +3826,43 @@ Static members:
 
 | Member | Type | Description |
 | --- | --- | --- |
-| `accessor` | `SCBlockAccessor` | readonly (computed) |
-| `allBlocks` | `readonly SCBlock[]` | readonly (computed) |
+| `accessor` | `SCBlockAccessor` | get-only |
+| `allBlocks` | `readonly SCBlock[]` | get-only |
 | `badges` | `number` | get/set via `setBadges()` |
-| `blocks` | `SaveBlockAccessor8SWSH` | readonly (computed) |
-| `boxInfo` | `Box8` | readonly (computed) |
-| `boxLayout` | `BoxLayout8` | readonly (computed) |
-| `coordinates` | `Coordinates8` | readonly (computed) |
-| `daycare` | `Daycare8` | readonly (computed) |
-| `fashion` | `FashionUnlock8` | readonly (computed) |
-| `fused` | `Fused8` | readonly (computed) |
+| `blocks` | `SaveBlockAccessor8SWSH` | get-only |
+| `boxInfo` | `Box8` | get-only |
+| `boxLayout` | `BoxLayout8` | get-only |
+| `coordinates` | `Coordinates8` | get-only |
+| `daycare` | `Daycare8` | get-only |
+| `fashion` | `FashionUnlock8` | get-only |
+| `fused` | `Fused8` | get-only |
 | `getBoxName(box: number)` | `string` |  |
 | `getBoxWallpaper(box: number)` | `number` |  |
 | `getRecord(recordID: number)` | `number` |  |
 | `getRecordMax(recordID: number)` | `number` |  |
 | `getRecordOffset(recordID: number)` | `number` |  |
 | `getValue(key: number)` | `T` |  |
-| `items` | `MyItem8` | readonly (computed) |
-| `misc` | `Misc8` | readonly (computed) |
-| `myStatus` | `MyStatus8` | readonly (computed) |
-| `partyInfo` | `Party8` | readonly (computed) |
-| `played` | `PlayTime7b` | readonly (computed) |
-| `raidArmor` | `RaidSpawnList8` | readonly (computed) |
-| `raidCrown` | `RaidSpawnList8` | readonly (computed) |
-| `raidGalar` | `RaidSpawnList8` | readonly (computed) |
-| `recordCount` | `number` | readonly (computed) |
-| `records` | `Record8` | readonly (computed) |
-| `saveRevision` | `number` | readonly (computed) |
-| `saveRevisionString` | `string` | readonly (computed) |
+| `items` | `MyItem8` | get-only |
+| `misc` | `Misc8` | get-only |
+| `myStatus` | `MyStatus8` | get-only |
+| `partyInfo` | `Party8` | get-only |
+| `played` | `PlayTime7b` | get-only |
+| `raidArmor` | `RaidSpawnList8` | get-only |
+| `raidCrown` | `RaidSpawnList8` | get-only |
+| `raidGalar` | `RaidSpawnList8` | get-only |
+| `recordCount` | `number` | get-only |
+| `records` | `Record8` | get-only |
+| `saveRevision` | `number` | get-only |
+| `saveRevisionString` | `string` | get-only |
 | `setBoxName(box: number, value: readonly string[])` | `void` |  |
 | `setBoxWallpaper(box: number, value: number)` | `void` |  |
 | `setRecord(recordID: number, value: number)` | `void` |  |
 | `setValue(key: number, value: T)` | `void` |  |
-| `teamIndexes` | `TeamIndexes8` | readonly (computed) |
-| `titleScreen` | `TitleScreen8` | readonly (computed) |
-| `trainerCard` | `TrainerCard8` | readonly (computed) |
+| `teamIndexes` | `TeamIndexes8` | get-only |
+| `titleScreen` | `TitleScreen8` | get-only |
+| `trainerCard` | `TrainerCard8` | get-only |
 | `unlockAllDiglett()` | `void` |  |
-| `zukan` | `Zukan8` | readonly (computed) |
+| `zukan` | `Zukan8` | get-only |
 
 ### `SAV9SV`
 
@@ -3955,49 +3870,49 @@ Static members:
 
 | Member | Type | Description |
 | --- | --- | --- |
-| `accessor` | `SCBlockAccessor` | readonly (computed) |
+| `accessor` | `SCBlockAccessor` | get-only |
 | `activateSnacksworthLegendaries()` | `void` |  |
-| `allBlocks` | `readonly SCBlock[]` | readonly (computed) |
-| `blocks` | `SaveBlockAccessor9SV` | readonly (computed) |
-| `blueberryClubRoom` | `BlueberryClubRoom9` | readonly (computed) |
+| `allBlocks` | `readonly SCBlock[]` | get-only |
+| `blocks` | `SaveBlockAccessor9SV` | get-only |
+| `blueberryClubRoom` | `BlueberryClubRoom9` | get-only |
 | `blueberryPoints` | `number` | get/set via `setBlueberryPoints()` |
-| `blueberryQuestRecord` | `BlueberryQuestRecord9` | readonly (computed) |
-| `boxInfo` | `Box9` | readonly (computed) |
-| `boxLayout` | `BoxLayout9` | readonly (computed) |
+| `blueberryQuestRecord` | `BlueberryQuestRecord9` | get-only |
+| `boxInfo` | `Box9` | get-only |
+| `boxLayout` | `BoxLayout9` | get-only |
 | `boxLegendWallpaperFlag` | `number` | get/set via `setBoxLegendWallpaperFlag()` |
 | `collectAllStakes()` | `void` |  |
-| `config` | `ConfigSave9` | readonly (computed) |
-| `coordinates` | `Uint8Array` | readonly (computed) |
-| `enrollmentDate` | `Epoch1900DateValue` | readonly (computed) |
+| `config` | `ConfigSave9` | get-only |
+| `coordinates` | `Uint8Array` | get-only |
+| `enrollmentDate` | `Epoch1900DateValue` | get-only |
 | `getBoxName(box: number)` | `string` |  |
 | `getBoxWallpaper(box: number)` | `number` |  |
 | `getValue(key: number)` | `T` |  |
-| `items` | `MyItem9` | readonly (computed) |
-| `lastDateCycle` | `Epoch1970Value` | readonly (computed) |
-| `lastSaved` | `Epoch1900DateTimeValue` | readonly (computed) |
+| `items` | `MyItem9` | get-only |
+| `lastDateCycle` | `Epoch1970Value` | get-only |
+| `lastSaved` | `Epoch1900DateTimeValue` | get-only |
 | `leaguePoints` | `number` | get/set via `setLeaguePoints()` |
-| `myStatus` | `MyStatus9` | readonly (computed) |
-| `partyInfo` | `Party9` | readonly (computed) |
-| `played` | `PlayTime9` | readonly (computed) |
-| `playerAppearance` | `PlayerAppearance9` | readonly (computed) |
-| `playerFashion` | `PlayerFashion9` | readonly (computed) |
-| `playerRotation` | `Uint8Array` | readonly (computed) |
+| `myStatus` | `MyStatus9` | get-only |
+| `partyInfo` | `Party9` | get-only |
+| `played` | `PlayTime9` | get-only |
+| `playerAppearance` | `PlayerAppearance9` | get-only |
+| `playerFashion` | `PlayerFashion9` | get-only |
+| `playerRotation` | `Uint8Array` | get-only |
 | `rw` | `number` | get/set via `setRw()` |
 | `rx` | `number` | get/set via `setRx()` |
 | `ry` | `number` | get/set via `setRy()` |
 | `rz` | `number` | get/set via `setRz()` |
-| `raidBlueberry` | `RaidSpawnList9` | readonly (computed) |
-| `raidKitakami` | `RaidSpawnList9` | readonly (computed) |
-| `raidPaldea` | `RaidSpawnList9` | readonly (computed) |
-| `raidSevenStar` | `RaidSevenStar9` | readonly (computed) |
-| `saveRevision` | `number` | readonly (computed) |
-| `saveRevisionString` | `string` | readonly (computed) |
+| `raidBlueberry` | `RaidSpawnList9` | get-only |
+| `raidKitakami` | `RaidSpawnList9` | get-only |
+| `raidPaldea` | `RaidSpawnList9` | get-only |
+| `raidSevenStar` | `RaidSevenStar9` | get-only |
+| `saveRevision` | `number` | get-only |
+| `saveRevisionString` | `string` | get-only |
 | `setBoxName(box: number, value: readonly string[])` | `void` |  |
 | `setBoxWallpaper(box: number, value: number)` | `void` |  |
 | `setCoordinates(x: number, y: number, z: number)` | `void` |  |
 | `setPlayerRotation(rx: number, ry: number, rz: number, rw: number)` | `void` |  |
 | `setValue(key: number, value: T)` | `void` |  |
-| `teamIndexes` | `TeamIndexes8` | readonly (computed) |
+| `teamIndexes` | `TeamIndexes8` | get-only |
 | `throwStyle` | `"OriginalStyle" \| "LeftHandedStyle" \| "ElegantStyle" \| "ReverentStyle" \| "NinjaStyle" \| "DaintyStyle" \| "TwirlingStyle" \| "SmugStyle" \| "GalarianStarStyle"` | get/set via `setThrowStyle()` |
 | `unlockAllCoaches()` | `void` |  |
 | `unlockAlltmRecipes()` | `void` |  |
@@ -4005,7 +3920,7 @@ Static members:
 | `x` | `number` | get/set via `setX()` |
 | `y` | `number` | get/set via `setY()` |
 | `z` | `number` | get/set via `setZ()` |
-| `zukan` | `Zukan9` | readonly (computed) |
+| `zukan` | `Zukan9` | get-only |
 
 ### `SAV9ZA`
 
@@ -4013,35 +3928,35 @@ Static members:
 
 | Member | Type | Description |
 | --- | --- | --- |
-| `accessor` | `SCBlockAccessor` | readonly (computed) |
-| `allBlocks` | `readonly SCBlock[]` | readonly (computed) |
-| `blocks` | `SaveBlockAccessor9ZA` | readonly (computed) |
-| `boxInfo` | `Box8` | readonly (computed) |
-| `boxLayout` | `BoxLayout9a` | readonly (computed) |
-| `config` | `ConfigSave9a` | readonly (computed) |
-| `coordinates` | `Coordinates9a` | readonly (computed) |
-| `donuts` | `DonutPocket9a` | readonly (computed) |
+| `accessor` | `SCBlockAccessor` | get-only |
+| `allBlocks` | `readonly SCBlock[]` | get-only |
+| `blocks` | `SaveBlockAccessor9ZA` | get-only |
+| `boxInfo` | `Box8` | get-only |
+| `boxLayout` | `BoxLayout9a` | get-only |
+| `config` | `ConfigSave9a` | get-only |
+| `coordinates` | `Coordinates9a` | get-only |
+| `donuts` | `DonutPocket9a` | get-only |
 | `getBoxName(box: number)` | `string` |  |
 | `getBoxWallpaper(box: number)` | `number` |  |
 | `getValue(key: number)` | `T` |  |
-| `infiniteRoyale` | `InfiniteRoyale9a` | readonly (computed) |
-| `items` | `MyItem9a` | readonly (computed) |
-| `lastSaved` | `Epoch1900DateTimeValue` | readonly (computed) |
-| `myStatus` | `MyStatus9a` | readonly (computed) |
-| `partyInfo` | `Party9a` | readonly (computed) |
-| `played` | `PlayTime9a` | readonly (computed) |
-| `playerAppearance` | `PlayerAppearance9a` | readonly (computed) |
-| `playerFashion` | `PlayerFashion9a` | readonly (computed) |
-| `saveRevision` | `number` | readonly (computed) |
-| `saveRevisionString` | `string` | readonly (computed) |
+| `infiniteRoyale` | `InfiniteRoyale9a` | get-only |
+| `items` | `MyItem9a` | get-only |
+| `lastSaved` | `Epoch1900DateTimeValue` | get-only |
+| `myStatus` | `MyStatus9a` | get-only |
+| `partyInfo` | `Party9a` | get-only |
+| `played` | `PlayTime9a` | get-only |
+| `playerAppearance` | `PlayerAppearance9a` | get-only |
+| `playerFashion` | `PlayerFashion9a` | get-only |
+| `saveRevision` | `number` | get-only |
+| `saveRevisionString` | `string` | get-only |
 | `setBoxName(box: number, value: readonly string[])` | `void` |  |
 | `setBoxWallpaper(box: number, value: number)` | `void` |  |
 | `setValue(key: number, value: T)` | `void` |  |
-| `startTime` | `Epoch1900DateTimeValue` | readonly (computed) |
-| `teamIndexes` | `TeamIndexes8` | readonly (computed) |
+| `startTime` | `Epoch1900DateTimeValue` | get-only |
+| `teamIndexes` | `TeamIndexes8` | get-only |
 | `ticketPointsRoyale` | `number` | get/set via `setTicketPointsRoyale()` |
 | `ticketPointsRoyaleInfinite` | `number` | get/set via `setTicketPointsRoyaleInfinite()` |
-| `zukan` | `Zukan9a` | readonly (computed) |
+| `zukan` | `Zukan9a` | get-only |
 
 ### `SAV_BEEF`
 
@@ -4049,7 +3964,7 @@ Static members:
 
 | Member | Type | Description |
 | --- | --- | --- |
-| `allBlocks` | `readonly BlockInfo[]` | readonly (computed) |
+| `allBlocks` | `readonly BlockInfo[]` | get-only |
 | `timeStampCurrent` | `bigint` | get/set via `setTimeStampCurrent()` — Timestamp that the save file was last saved at (Secure Value) |
 | `timeStampPrevious` | `bigint` | get/set via `setTimeStampPrevious()` — Timestamp that the save file was saved at prior to the  (Secure Value) |
 
@@ -4063,8 +3978,8 @@ Static members:
 | `getTeam(team: number)` | `SlotGroup` |  |
 | `japanese` | `boolean` | readonly (computed) |
 | `korean` | `boolean` | readonly (computed) |
-| `saveRevision` | `number` | readonly (computed) |
-| `saveRevisionString` | `string` | readonly (computed) |
+| `saveRevision` | `number` | get-only |
+| `saveRevisionString` | `string` | get-only |
 
 ### `SK2`
 
@@ -4088,27 +4003,27 @@ Static members:
 | Member | Type | Description |
 | --- | --- | --- |
 | `adaptToSaveFile(pk: PKM, isParty: boolean, option: "UseDefault" | "Enable" | "Disable")` | `void` |  |
-| `blankpkm` | `PKM` | readonly (computed) |
-| `boxCount` | `number` | readonly (computed) |
+| `blankpkm` | `PKM` | get-only |
+| `boxCount` | `number` | get-only |
 | `boxData` | `readonly PKM[]` | get/set via `setBoxData()` |
 | `boxFlags` | `Uint8Array` | get/set via `setBoxFlags()` |
-| `boxSlotCount` | `number` | readonly (computed) |
+| `boxSlotCount` | `number` | get-only |
 | `boxesUnlocked` | `number` | get/set via `setBoxesUnlocked()` |
 | `buffer` | `Uint8Array` | get/set via `setBuffer()` |
 | `caughtCount` | `number` | readonly (computed) — Count of unique Species Caught (Owned) |
-| `checksumInfo` | `string` | readonly (computed) |
-| `checksumsValid` | `boolean` | readonly (computed) |
+| `checksumInfo` | `string` | get-only |
+| `checksumsValid` | `boolean` | get-only |
 | `clearBoxes(BoxStart: number, BoxEnd: number, deleteCriteria: (arg0: PKM) => boolean)` | `number` |  |
 | `clone()` | `SaveFile` |  |
 | `compressStorage(storedCount: number, slotPointers: readonly number[])` | `boolean` |  |
-| `context` | `"None" \| "Gen1" \| "Gen2" \| "Gen3" \| "Gen4" \| "Gen5" \| "Gen6" \| "Gen7" \| "Gen8" \| "Gen9" \| "SplitInvalid" \| "Gen7b" \| "Gen8a" \| "Gen8b" \| "Gen9a" \| "MaxInvalid"` | readonly (computed) |
+| `context` | `"None" \| "Gen1" \| "Gen2" \| "Gen3" \| "Gen4" \| "Gen5" \| "Gen6" \| "Gen7" \| "Gen8" \| "Gen9" \| "SplitInvalid" \| "Gen7b" \| "Gen8a" \| "Gen8b" \| "Gen9a" \| "MaxInvalid"` | get-only |
 | `copyChangesFrom(sav: SaveFile)` | `void` |  |
 | `currentBox` | `number` | get/set via `setCurrentBox()` |
-| `data` | `Uint8Array` | readonly (computed) |
+| `data` | `Uint8Array` | get-only |
 | `deletePartySlot(slot: number)` | `void` |  |
 | `displaysid` | `number` | get/set via `setDisplaysid()` |
 | `displaytid` | `number` | get/set via `setDisplaytid()` |
-| `extension` | `string` | readonly (computed) |
+| `extension` | `string` | get-only |
 | `gender` | `number` | get/set via `setGender()` |
 | `generation` | `number` | readonly (computed) |
 | `getBoxBinary(box: number)` | `Uint8Array` |  |
@@ -4133,12 +4048,12 @@ Static members:
 | `getSeen(species: number)` | `boolean` |  |
 | `getStoredSlot(data: Uint8Array)` | `PKM` |  |
 | `getString(data: Uint8Array)` | `string` |  |
-| `hasBox` | `boolean` | readonly (computed) |
-| `hasParty` | `boolean` | readonly (computed) |
-| `hasPokeDex` | `boolean` | readonly (computed) |
-| `heldItems` | `readonly number[]` | readonly (computed) |
+| `hasBox` | `boolean` | get-only |
+| `hasParty` | `boolean` | get-only |
+| `hasPokeDex` | `boolean` | get-only |
+| `heldItems` | `readonly number[]` | get-only |
 | `id32` | `number` | get/set via `setId32()` |
-| `inventory` | `PlayerBag` | readonly (computed) |
+| `inventory` | `PlayerBag` | get-only |
 | `isAnySlotLockedInBox(BoxStart: number, BoxEnd: number)` | `boolean` |  |
 | `isBoxSlotLocked(box: number, slot: number)` | `boolean` |  |
 | `isBoxSlotLocked(index: number)` | `boolean` |  |
@@ -4146,45 +4061,45 @@ Static members:
 | `isBoxSlotOverwriteProtected(box: number, slot: number)` | `boolean` |  |
 | `ispkmPresent(data: Uint8Array)` | `boolean` |  |
 | `isPartyAllEggs(except: number)` | `boolean` |  |
-| `isStorageFull` | `boolean` | readonly (computed) |
+| `isStorageFull` | `boolean` | get-only |
 | `isVersionValid()` | `boolean` |  |
 | `language` | `number` | get/set via `setLanguage()` |
 | `loadString(data: Uint8Array, text: readonly string[])` | `number` |  |
-| `maxAbilityid` | `number` | readonly (computed) |
-| `maxBallid` | `number` | readonly (computed) |
-| `maxCoins` | `number` | readonly (computed) |
-| `maxev` | `number` | readonly (computed) |
-| `maxGameid` | `"Any" \| "S" \| "R" \| "E" \| "FR" \| "LG" \| "HG" \| "SS" \| "D" \| "P" \| "Pt" \| "CXD" \| "BATREV" \| "W" \| "B" \| "W2" \| "B2" \| "X" \| "Y" \| "AS" \| "OR" \| "SN" \| "MN" \| "US" \| "UM" \| "GO" \| "RD" \| "GN" \| "BU" \| "YW" \| "GD" \| "SI" \| "C" \| "GP" \| "GE" \| "SW" \| "SH" \| "PLA" \| "BD" \| "SP" \| "SL" \| "VL" \| "ZA" \| "CP" \| "RB" \| "RBY" \| "GS" \| "GSC" \| "RS" \| "RSE" \| "FRLG" \| "RSBOX" \| "COLO" \| "XD" \| "DP" \| "DPPt" \| "HGSS" \| "BW" \| "B2W2" \| "XY" \| "ORASDEMO" \| "ORAS" \| "SM" \| "USUM" \| "GG" \| "SWSH" \| "BDSP" \| "SV" \| "Gen1" \| "Gen2" \| "Gen3" \| "Gen4" \| "Gen5" \| "Gen6" \| "Gen7" \| "Gen7b" \| "Gen8" \| "Gen9" \| "StadiumJ" \| "Stadium" \| "Stadium2" \| "EFL" \| "Invalid"` | readonly (computed) |
-| `maxiv` | `number` | readonly (computed) |
-| `maxItemid` | `number` | readonly (computed) |
-| `maxMoney` | `number` | readonly (computed) |
-| `maxMoveid` | `number` | readonly (computed) |
-| `maxSpeciesid` | `number` | readonly (computed) |
-| `maxStringLengthNickname` | `number` | readonly (computed) |
-| `maxStringLengthTrainer` | `number` | readonly (computed) |
+| `maxAbilityid` | `number` | get-only |
+| `maxBallid` | `number` | get-only |
+| `maxCoins` | `number` | get-only |
+| `maxev` | `number` | get-only |
+| `maxGameid` | `"Any" \| "S" \| "R" \| "E" \| "FR" \| "LG" \| "HG" \| "SS" \| "D" \| "P" \| "Pt" \| "CXD" \| "BATREV" \| "W" \| "B" \| "W2" \| "B2" \| "X" \| "Y" \| "AS" \| "OR" \| "SN" \| "MN" \| "US" \| "UM" \| "GO" \| "RD" \| "GN" \| "BU" \| "YW" \| "GD" \| "SI" \| "C" \| "GP" \| "GE" \| "SW" \| "SH" \| "PLA" \| "BD" \| "SP" \| "SL" \| "VL" \| "ZA" \| "CP" \| "RB" \| "RBY" \| "GS" \| "GSC" \| "RS" \| "RSE" \| "FRLG" \| "RSBOX" \| "COLO" \| "XD" \| "DP" \| "DPPt" \| "HGSS" \| "BW" \| "B2W2" \| "XY" \| "ORASDEMO" \| "ORAS" \| "SM" \| "USUM" \| "GG" \| "SWSH" \| "BDSP" \| "SV" \| "Gen1" \| "Gen2" \| "Gen3" \| "Gen4" \| "Gen5" \| "Gen6" \| "Gen7" \| "Gen7b" \| "Gen8" \| "Gen9" \| "StadiumJ" \| "Stadium" \| "Stadium2" \| "EFL" \| "Invalid"` | get-only |
+| `maxiv` | `number` | get-only |
+| `maxItemid` | `number` | get-only |
+| `maxMoney` | `number` | get-only |
+| `maxMoveid` | `number` | get-only |
+| `maxSpeciesid` | `number` | get-only |
+| `maxStringLengthNickname` | `number` | get-only |
+| `maxStringLengthTrainer` | `number` | get-only |
 | `metadata` | `SaveFileMetadata` | get/set via `setMetadata()` |
-| `minGameid` | `"Any" \| "S" \| "R" \| "E" \| "FR" \| "LG" \| "HG" \| "SS" \| "D" \| "P" \| "Pt" \| "CXD" \| "BATREV" \| "W" \| "B" \| "W2" \| "B2" \| "X" \| "Y" \| "AS" \| "OR" \| "SN" \| "MN" \| "US" \| "UM" \| "GO" \| "RD" \| "GN" \| "BU" \| "YW" \| "GD" \| "SI" \| "C" \| "GP" \| "GE" \| "SW" \| "SH" \| "PLA" \| "BD" \| "SP" \| "SL" \| "VL" \| "ZA" \| "CP" \| "RB" \| "RBY" \| "GS" \| "GSC" \| "RS" \| "RSE" \| "FRLG" \| "RSBOX" \| "COLO" \| "XD" \| "DP" \| "DPPt" \| "HGSS" \| "BW" \| "B2W2" \| "XY" \| "ORASDEMO" \| "ORAS" \| "SM" \| "USUM" \| "GG" \| "SWSH" \| "BDSP" \| "SV" \| "Gen1" \| "Gen2" \| "Gen3" \| "Gen4" \| "Gen5" \| "Gen6" \| "Gen7" \| "Gen7b" \| "Gen8" \| "Gen9" \| "StadiumJ" \| "Stadium" \| "Stadium2" \| "EFL" \| "Invalid"` | readonly (computed) |
+| `minGameid` | `"Any" \| "S" \| "R" \| "E" \| "FR" \| "LG" \| "HG" \| "SS" \| "D" \| "P" \| "Pt" \| "CXD" \| "BATREV" \| "W" \| "B" \| "W2" \| "B2" \| "X" \| "Y" \| "AS" \| "OR" \| "SN" \| "MN" \| "US" \| "UM" \| "GO" \| "RD" \| "GN" \| "BU" \| "YW" \| "GD" \| "SI" \| "C" \| "GP" \| "GE" \| "SW" \| "SH" \| "PLA" \| "BD" \| "SP" \| "SL" \| "VL" \| "ZA" \| "CP" \| "RB" \| "RBY" \| "GS" \| "GSC" \| "RS" \| "RSE" \| "FRLG" \| "RSBOX" \| "COLO" \| "XD" \| "DP" \| "DPPt" \| "HGSS" \| "BW" \| "B2W2" \| "XY" \| "ORASDEMO" \| "ORAS" \| "SM" \| "USUM" \| "GG" \| "SWSH" \| "BDSP" \| "SV" \| "Gen1" \| "Gen2" \| "Gen3" \| "Gen4" \| "Gen5" \| "Gen6" \| "Gen7" \| "Gen7b" \| "Gen8" \| "Gen9" \| "StadiumJ" \| "Stadium" \| "Stadium2" \| "EFL" \| "Invalid"` | get-only |
 | `miscSaveInfo()` | `string` |  |
 | `modifyBoxes(action: (arg0: PKM) => void, BoxStart: number, BoxEnd: number)` | `number` |  |
 | `money` | `number` | get/set via `setMoney()` |
 | `moveBox(box: number, insertBeforeBox: number)` | `boolean` |  |
 | `nextOpenBoxSlot(lastKnownOccupied: number)` | `number` |  |
 | `ot` | `string` | get/set via `setOt()` |
-| `pkmExtensions` | `readonly string[]` | readonly (computed) |
-| `pkmType` | `Type` | readonly (computed) |
+| `pkmExtensions` | `readonly string[]` | get-only |
+| `pkmType` | `Type` | get-only |
 | `partyCount` | `number` | get/set via `setPartyCount()` |
 | `partyData` | `readonly PKM[]` | get/set via `setPartyData()` |
 | `percentCaught` | `number` | readonly (computed) |
 | `percentSeen` | `number` | readonly (computed) |
-| `personal` | `IPersonalTable` | readonly (computed) |
+| `personal` | `IPersonalTable` | get-only |
 | `playTimeString` | `string` | readonly (computed) |
 | `playedHours` | `number` | get/set via `setPlayedHours()` |
 | `playedMinutes` | `number` | get/set via `setPlayedMinutes()` |
 | `playedSeconds` | `number` | get/set via `setPlayedSeconds()` |
 | `sid16` | `number` | get/set via `setSid16()` |
-| `sizeBoxslot` | `number` | readonly (computed) |
-| `sizeParty` | `number` | readonly (computed) |
-| `sizeStored` | `number` | readonly (computed) |
+| `sizeBoxslot` | `number` | get-only |
+| `sizeParty` | `number` | get-only |
+| `sizeStored` | `number` | get-only |
 | `secondsToFame` | `number` | get/set via `setSecondsToFame()` |
 | `secondsToStart` | `number` | get/set via `setSecondsToStart()` |
 | `seenCount` | `number` | readonly (computed) |
@@ -4207,10 +4122,10 @@ Static members:
 | `setString(destBuffer: Uint8Array, value: readonly string[], maxLength: number, option: "None" | "ClearZero" | "Clear50" | "Clear7F" | "ClearFF" | "ClearZeroSafeTerminate")` | `number` |  |
 | `slotCount` | `number` | readonly (computed) |
 | `sortBoxes(BoxStart: number, BoxEnd: number, sortMethod: (arg0: readonly PKM[], arg1: number) => readonly PKM[], reverse: boolean)` | `number` |  |
-| `state` | `SaveFileState` | readonly (computed) |
+| `state` | `SaveFileState` | get-only |
 | `swapBox(box1: number, box2: number)` | `boolean` |  |
 | `tid16` | `number` | get/set via `setTid16()` |
-| `traineridDisplayFormat` | `"None" \| "SixteenBitSingle" \| "SixteenBit" \| "SixDigit"` | readonly (computed) |
+| `traineridDisplayFormat` | `"None" \| "SixteenBitSingle" \| "SixteenBit" \| "SixDigit"` | get-only |
 | `trainersid7` | `number` | get/set via `setTrainersid7()` |
 | `trainertid7` | `number` | get/set via `setTrainertid7()` |
 | `version` | `"Any" \| "S" \| "R" \| "E" \| "FR" \| "LG" \| "HG" \| "SS" \| "D" \| "P" \| "Pt" \| "CXD" \| "BATREV" \| "W" \| "B" \| "W2" \| "B2" \| "X" \| "Y" \| "AS" \| "OR" \| "SN" \| "MN" \| "US" \| "UM" \| "GO" \| "RD" \| "GN" \| "BU" \| "YW" \| "GD" \| "SI" \| "C" \| "GP" \| "GE" \| "SW" \| "SH" \| "PLA" \| "BD" \| "SP" \| "SL" \| "VL" \| "ZA" \| "CP" \| "RB" \| "RBY" \| "GS" \| "GSC" \| "RS" \| "RSE" \| "FRLG" \| "RSBOX" \| "COLO" \| "XD" \| "DP" \| "DPPt" \| "HGSS" \| "BW" \| "B2W2" \| "XY" \| "ORASDEMO" \| "ORAS" \| "SM" \| "USUM" \| "GG" \| "SWSH" \| "BDSP" \| "SV" \| "Gen1" \| "Gen2" \| "Gen3" \| "Gen4" \| "Gen5" \| "Gen6" \| "Gen7" \| "Gen7b" \| "Gen8" \| "Gen9" \| "StadiumJ" \| "Stadium" \| "Stadium2" \| "EFL" \| "Invalid"` | get/set via `setVersion()` |
@@ -4220,7 +4135,7 @@ Static members:
 
 | Member | Type | Description |
 | --- | --- | --- |
-| `setUpdateSettings` | `EntityImportSettings` | readonly (computed) |
+| `setUpdateSettings` | `EntityImportSettings` | get-only |
 
 ### `XK3`
 
@@ -4235,7 +4150,7 @@ Static members:
 | `encounterInfo` | `number` | get/set via `setEncounterInfo()` |
 | `isShadow` | `boolean` | get/set via `setIsShadow()` |
 | `nicknameDisplay` | `string` | get/set via `setNicknameDisplay()` |
-| `nicknameDisplayTrash` | `Uint8Array` | readonly (computed) |
+| `nicknameDisplayTrash` | `Uint8Array` | get-only |
 | `obedient` | `boolean` | get/set via `setObedient()` |
 | `originalRegion` | `"NoRegion" \| "NTSC_J" \| "NTSC_U" \| "PAL"` | get/set via `setOriginalRegion()` |
 | `purification` | `number` | get/set via `setPurification()` |
@@ -4324,67 +4239,3 @@ the reflector's scope widens:
 - `isRK4(entity: PKM)`
 - `isSK2(entity: PKM)`
 - `isXK3(entity: PKM)`
-
-## Crypto requirements
-
-Locked by [Choose crypto strategy](https://github.com/EthanThatOneKid/pkhex-wasm/issues/8):
-
-- **Strategy: managed in-bundle.** Pure-managed MD5 + AES-128 (ECB & CBC, NoPadding) vendored into the wasm bundle and registered onto `RuntimeCryptographyProvider.Aes` / `.Md5` during `initPKHex()` — before any save parsing, invisible to consumers. Managed crypto only: no JavaScript crypto involvement anywhere, no crypto-js dependency, nothing for consumers to install.
-- **The three real seams** this unblocks: BDSP whole-save MD5, MemeCrypto AES-128-ECB-NoPadding, HOME AES-128-CBC-NoPadding. Gen 1–6 paths never touch them (zero cost when unused).
-- **Sourcing**: existing MIT/public-domain pure-C# implementations (BouncyCastle-lineage or equivalent), stripped to MD5 + the AES block cipher + the two modes only. Provenance reviewed at adoption; GPLv3 unaffected by MIT-vendored parts.
-- **Rejected alternatives**: crypto-js `[JSImport]` bridge (~60 KB gz on every consumer bundle, maintenance-mode dependency, hex-marshaling per call); native WebCrypto (no MD5 in `subtle.digest`, ECB deliberately excluded, CBC is PKCS#7-only against the NoPadding requirement, async-only interface clashes with the sync parse chain, `Atomics.wait`/SharedArrayBuffer sync-ification would force COOP/COEP headers onto every consuming page).
-- **Verification bar**: RFC 1321 test vectors (MD5) and NIST SP 800-38A vectors (AES-ECB/AES-CBC) as xUnit cases, round-trip properties, Node-crypto cross-checks via shared constants; upstream MemeCrypto/Home tests stay green untouched.
-
-## Testing requirements
-
-Locked by [Define testing strategy and packaging/CI gates](https://github.com/EthanThatOneKid/pkhex-wasm/issues/11):
-
-- **Fixture saves**: blank-generated primary strategy — a shared test factory builds blank saves per `EntityContext` (the spike/probe pattern). **No real save binaries are ever committed** (legal/privacy gray zone; real-file parsing robustness is upstream Core's own test burden). A gitignored local fixtures directory stays available for development against personal dumps.
-- **Assertion layers**: C# xUnit remains the logic seam and hosts the RFC 1321 / NIST SP 800-38A crypto vectors; expected digests ship as constants shared by both layers so the JS suite asserts identical results.
-- **Bootstrap assertion**: a dedicated test asserts `initPKHex()` registers the Managed crypto providers *before any parse path can run* (mandated by [#8](https://github.com/EthanThatOneKid/pkhex-wasm/issues/8)).
-- **JS-side harness**: playwright-driven E2E against the built static site on ubuntu CI (headless Chromium). Node-loading of `wasmbrowser` output is explicitly avoided; no `wasmconsole` double-build.
-- **Generator drift gate**: `deno task gen:check` fails CI when any generated artifact lags its model input.
-- **CI matrix**: PR = recursive-submodule checkout → .NET 10 setup → Release build → full `dotnet test` → JS E2E → publish artifact + size-budget check. `main` additionally triggers the docs workflow.
-
-## Packaging & release
-
-Locked by [Define testing strategy and packaging/CI gates](https://github.com/EthanThatOneKid/pkhex-wasm/issues/11), following the [docxodus](https://github.com/EthanThatOneKid/pkhex-wasm/issues/4) and libsidplayfp-wasm patterns:
-
-- **Tarball shape** (docxodus wholesale): ESM-only entry exporting `initPKHex` + Lookup tables, per-entry `.d.ts`, entire wasm runtime under `dist/wasm/_framework`, precompressed brotli siblings.
-- **Size budget gate**: hard build failure above **8 MB gz first-load** (spike baseline ~6 MB leaves headroom for tables + compliance kit).
-- **GPL compliance kit** (libsidplayfp pattern): `complete-source.tar.gz` shipped *inside the npm tarball* **and** attached to every GitHub release (satisfying GPLv3 §3a), plus `THIRD-PARTY-NOTICES.md`, a `MODIFICATIONS.md` log, and a commit-pinned `upstream.json`.
-- **Publishing**: tag `v*` → assemble compliance kit → build → `npm publish --access public` with OIDC trusted publishing (npm ≥ 11 pinned), mirroring docxodus's release workflow.
-- **Upstream sync ritual** (manual, owner-owned — upstream has no stable release train to watch mechanically): bump the `PKHeX.Everywhere` submodule → full suite green → changelog note → semver call per the API-surface contract ([#7](https://github.com/EthanThatOneKid/pkhex-wasm/issues/7)): minor if behavior adds, patch if fixes, major if the JS surface breaks. Documented CONTRIBUTING-style.
-
-## Risk register
-
-Known landmines, discovered during research and the empirical probe — every implementation session should re-read this list:
-
-| Risk | Consequence | Mitigation |
-| --- | --- | --- |
-| Upstream `SetUnshiny` on GB formats can loop forever (`SetPIDGender` reroll against a no-op PID setter) | Hang in consumer code via `setShiny(false)` on Gen 1–2 | All mutators throw on read-only tiers per [#10](https://github.com/EthanThatOneKid/pkhex-wasm/issues/10) — Gen 1–2 never reach Core; hazard recorded as part of why their editing stays deferred |
-| `CommonEdits.SetNature` silently no-ops on Gen 8+ formats (mint-derived natures) | Edits that look applied but aren't | Mint-aware write path (Facade `Natures.ChangeAll` semantics) is a hard requirement |
-| Blank `SAV3` constructs with an empty data buffer; Gen 3/4 blanks cannot `Write()` at all, and Swish-family blanks (SwSh/PLA/SV/Z-A) write bytes whose block layout matches no retail size | Fixture-factory round-trips impossible for five edit-tier generations | Factory excludes them (pinned by classification tests); their shared write path is covered at the Core seam instead; probe code documents the exact quirks |
-| IL trim warnings around `EntityConverter` / `EvolutionTree` under NativeAOT-style trimming | Runtime breaks surface late | Trim warnings tracked per upstream bump; spike's trim profile is the baseline |
-| .NET 10 wasmbrowser template churn between SDK bumps | Host bootstrap drifts | Spike pins behavior in tests; bump ritual includes full E2E run |
-| Four duplicate `PKHeX.Core.wasm` variants observed in intermediate output (only one loads) | Silent bundle-size bloat | Packaging step audits emitted assets against the size gate |
-
-## Documentation pipeline
-
-Live site: <https://ethanthatonekid.github.io/pkhex-wasm/> — regenerated on every push to `main` by the docs workflow from [`tools/apigen/fixtures/pkhex-wasm.d.ts`](../../tools/apigen/fixtures/pkhex-wasm.d.ts), the generated canonical declaration file; the packaging pipeline ships the same bytes as the package's `index.d.ts`, so the site always documents the shipped surface. The original hand-authored seed retired into generator fixtures when generated types replaced it.
-
-## Implementation checklist
-
-Ordered handoff list — each step is one session-sized unit of work:
-
-1. **Repo layout**: promote `src/ts/` (binding package source, bootstrapped by this generator) and a real wasm host library evolving `spike/SpikeLib` beyond demo scope.
-2. **Binding layer**: implement the Handle classes against `[JSExport]` services over Core directly (AutoMod excluded from the bundle), honoring [Data contracts](#data-contracts).
-3. **Managed crypto**: vendor MIT-lineage MD5/AES-128-ECB/CBC-NoPadding; register at init; land RFC/NIST vector tests + Node cross-checks.
-4. **Tier enforcement**: edit/read-only guards ahead of every mutator call; descriptive errors per the matrix.
-5. **Lookup-table generator**: build-time table JSON (species/natures/moves universal; items per game family) hydrated at init.
-6. **Test factory + E2E**: blank-fixture factory per `EntityContext`; generalize the spike QA scripts into the playwright suite with shared crypto-vector constants.
-7. **Packaging pipeline**: docxodus-shaped tarball build, brotli precompression, 8 MB gz budget gate, compliance-kit script (`complete-source.tar.gz`, notices, modifications log, `upstream.json`).
-8. **Publish workflow + ritual doc**: tag-triggered OIDC publishing; CONTRIBUTING section for the upstream-sync ritual.
-9. **Docs entrypoint swap**: when generated types replace the skeleton, point the docs workflow at the new entry and retire the interim declaration file into generator fixtures.
-
-Each generation-support addition beyond v1 repeats: capability probe → tier assignment → fixture coverage → table generation → docs matrix update.

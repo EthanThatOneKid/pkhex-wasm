@@ -83,6 +83,39 @@ Deno.test("chapter renders member tables with setters, docs, and computed notes"
   assert.ok(chapter.includes("readonly (computed)"), chapter);
 });
 
+Deno.test("get-only non-computed members are labeled get-only, not computed", () => {
+  // Bank-style metadata: access "get" with computed false must not claim
+  // the ADR's narrow computed definition ("recomputes or never stored").
+  const getOnly: CoreMetaLike = {
+    ...synthetic,
+    enums: {},
+    classes: {
+      "NS.Bank3": {
+        name: "NS.Bank3",
+        kind: "class",
+        baseChain: [],
+        entityContext: null,
+        members: [
+          {
+            csName: "BoxCount",
+            kind: "property",
+            csType: "int",
+            access: "get",
+            computed: false,
+            isStatic: false,
+            declaredBy: "NS.Bank3",
+            docs: null,
+            params: [],
+          },
+        ],
+      },
+    },
+  };
+  const chapter = buildV2ApiReference(getOnly);
+  assert.ok(chapter.includes("get-only"), chapter);
+  assert.ok(!chapter.includes("readonly (computed)"), chapter);
+});
+
 Deno.test("shadowed redeclarations appear once and are counted", () => {
   const model = projectCoreMeta(synthetic);
   assert.equal(model.stats.shadowed, 1);
