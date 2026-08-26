@@ -30,6 +30,14 @@ jobs:
       - name: Generator drift gate
         run: deno task gen:check
 
+      # Inverted gate (ticket #35 slice 4): regenerate the Core facts from the
+      # vendored submodule; any member/type change must fail CI until the
+      # committed metadata and every projected artifact catch up.
+      - name: Reflector determinism gate
+        run: |
+          deno task reflect
+          git diff --exit-code -- tools/apigen/runtime-meta-v2.json
+
       - name: Generator tests
         run: deno task apigen:test
 
